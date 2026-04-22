@@ -1,0 +1,13 @@
+services:
+  backend:
+    environment:
+      APP_ENV: research
+
+  worker:
+    environment:
+      APP_ENV: research
+
+  frontend:
+    environment:
+      NODE_ENV: production
+

@@ -1,0 +1,42 @@
+services:
+  backend:
+    environment:
+      APP_ENV: development
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./apps/worker:/app/apps/worker
+      - ./packages:/app/packages
+      - uploaded_documents:/app/data/uploads
+      - export_artifacts:/app/data/exports
+      - ./seeds:/app/seeds:ro
+
+  worker:
+    environment:
+      APP_ENV: development
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./apps/worker:/app/apps/worker
+      - ./packages:/app/packages
+      - uploaded_documents:/app/data/uploads
+      - export_artifacts:/app/data/exports
+      - ./seeds:/app/seeds:ro
+
+  frontend:
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./apps/frontend:/app/apps/frontend
+      - ./packages/shared-schemas:/app/packages/shared-schemas
+    command: sh -c "cd /app/apps/frontend && npm install && npm run dev"
+
+  pgadmin:
+    image: dpage/pgadmin4:9
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5050:80"
+
