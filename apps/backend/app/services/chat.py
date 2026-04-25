@@ -13,6 +13,7 @@ from app.models.entities import (
     ChatMessage,
     ChatSession,
     ExperimentRun,
+    RagDocument,
     RagDocumentChunk,
     RetrievalLog,
     SkillRevision,
@@ -34,6 +35,29 @@ def _ensure_session(session: Session, user_id: str, session_id: str | None) -> C
     session.add(chat_session)
     session.flush()
     return chat_session
+
+
+def _build_no_retrieval_candidates(generation_id: str, candidate_count: int) -> list[AnswerCandidate]:
+    candidates: list[AnswerCandidate] = []
+    for index in range(1, candidate_count + 1):
+        candidates.append(
+            AnswerCandidate(
+                generation_run_id=generation_id,
+                rank=index,
+                display_order=index,
+                title="該当箇所なし",
+                style_tags=["no-retrieval"],
+                answer_text="資料中に該当箇所が見つかりません。",
+                rationale_internal="Retrieval score was below the configured threshold, so generation was skipped.",
+            )
+        )
+    return candidates
+
+
+def _retrieval_is_confident(retrieval_rows: list[dict], min_score: float) -> bool:
+    if not retrieval_rows:
+        return False
+    return max(float(row["score"]) for row in retrieval_rows) >= min_score
 
 
 def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest) -> dict:
@@ -68,6 +92,9 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
         provider_name=query_embedding_result.provider_name,
         model_name=query_embedding_result.model_name,
         dimensions=query_embedding_result.dimensions,
+        document_ids=payload.document_ids,
+        min_score=settings.min_retrieval_score,
+        lexical_fallback_question=payload.question,
     )
 
     generation = AnswerGenerationRun(
@@ -84,27 +111,32 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
     session.add(generation)
     session.flush()
 
-    candidate_set, _metadata = generation_provider.generate_candidates(
-        question=payload.question,
-        retrievals=retrieval_rows,
-        skill_profile=skill_profile,
-        candidate_count=payload.candidate_count,
-        skills_enabled=payload.skills_enabled,
-    )
-
     candidates: list[AnswerCandidate] = []
-    for index, candidate in enumerate(candidate_set.candidates, start=1):
-        row = AnswerCandidate(
-            generation_run_id=generation.id,
-            rank=index,
-            display_order=index,
-            title=candidate.title,
-            style_tags=candidate.style_tags,
-            answer_text=candidate.answer_text,
-            rationale_internal=candidate.rationale,
+    if _retrieval_is_confident(retrieval_rows, settings.min_retrieval_score):
+        candidate_set, _metadata = generation_provider.generate_candidates(
+            question=payload.question,
+            retrievals=retrieval_rows,
+            skill_profile=skill_profile,
+            candidate_count=payload.candidate_count,
+            skills_enabled=payload.skills_enabled,
         )
-        session.add(row)
-        candidates.append(row)
+        for index, candidate in enumerate(candidate_set.candidates, start=1):
+            candidates.append(
+                AnswerCandidate(
+                    generation_run_id=generation.id,
+                    rank=index,
+                    display_order=index,
+                    title=candidate.title,
+                    style_tags=candidate.style_tags,
+                    answer_text=candidate.answer_text,
+                    rationale_internal=candidate.rationale,
+                )
+            )
+    else:
+        generation.status = "no_retrieval_match"
+        candidates = _build_no_retrieval_candidates(generation.id, payload.candidate_count)
+
+    session.add_all(candidates)
 
     for index, retrieval in enumerate(retrieval_rows, start=1):
         session.add(
@@ -222,10 +254,13 @@ def get_session_detail(session: Session, session_id: str) -> dict:
         retrieval_payload = []
         for retrieval in retrievals:
             chunk = session.get(RagDocumentChunk, retrieval.chunk_id)
+            document = session.get(RagDocument, chunk.document_id) if chunk else None
             retrieval_payload.append(
                 {
                     "chunk_id": retrieval.chunk_id,
                     "document_id": chunk.document_id if chunk else "",
+                    "filename": document.filename if document else "",
+                    "chunk_index": chunk.chunk_index if chunk else 0,
                     "score": retrieval.score,
                     "text": chunk.content if chunk else "",
                 }

@@ -102,6 +102,7 @@ def upload_document_route(file: UploadFile = File(...), session: Session = Depen
         document_id=document.id,
         filename=document.filename,
         mime_type=document.mime_type,
+        source_type=document.source_type,
         ingest_status=document.ingest_status,
         created_at=document.created_at,
     )
@@ -120,6 +121,7 @@ def list_documents_route(session: Session = Depends(get_session)) -> list[Docume
             document_id=document.id,
             filename=document.filename,
             mime_type=document.mime_type,
+            source_type=document.source_type,
             ingest_status=document.ingest_status,
             created_at=document.created_at,
         )
@@ -171,6 +173,8 @@ def generate_chat_route(payload: ChatGenerateRequest, session: Session = Depends
             {
                 "chunk_id": row["chunk_id"],
                 "document_id": row["document_id"],
+                "filename": row["filename"],
+                "chunk_index": row["chunk_index"],
                 "score": row["score"],
                 "text": row["text"],
             }

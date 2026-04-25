@@ -24,7 +24,7 @@ type SessionLog = {
       clarity_score: number;
       comment: string | null;
     } | null;
-    retrievals: Array<{ chunk_id: string; score: number; text: string }>;
+    retrievals: Array<{ chunk_id: string; document_id: string; filename: string; chunk_index: number; score: number; text: string }>;
     created_at: string;
   }>;
 };
@@ -117,7 +117,7 @@ export function LogsWorkspace() {
                     message.retrievals.map((retrieval) => (
                       <div key={retrieval.chunk_id}>
                         <p className="muted">
-                          {retrieval.chunk_id} / {retrieval.score.toFixed(4)}
+                          {retrieval.filename} / chunk {retrieval.chunk_index} / {retrieval.score.toFixed(4)}
                         </p>
                         <p>{retrieval.text}</p>
                       </div>

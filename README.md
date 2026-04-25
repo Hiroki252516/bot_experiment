@@ -54,6 +54,7 @@ cp .env.example .env
 - `LOCAL_EMBED_MODEL`
 - `LOCAL_EMBED_DEVICE`
 - `EMBEDDING_DIMENSIONS`
+- `MIN_RETRIEVAL_SCORE`
 - `HF_HOME`
 - `SENTENCE_TRANSFORMERS_HOME`
 - `UPLOAD_DIR`
@@ -140,6 +141,10 @@ docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
 ```
 
 Gemini embedding 由来の既存 vector と local embedding は同じ 768 次元でも混在検索しません。実装上は active `provider_name/model_name/dimensions` で retrieval を絞りますが、検索品質を保つため、provider/model を切り替えた後は対象 document を再 ingest してください。
+
+Chat 画面では検索対象教材を選択できます。初期状態では直近の uploaded かつ completed の教材が選択されます。未選択の場合、通常検索では `source_type=seed` の教材を除外し、uploaded 教材全体を検索します。seed 教材を使いたい場合は明示的に選択してください。
+
+`MIN_RETRIEVAL_SCORE` 未満の検索結果しかない場合、まず日本語キーワードの LIKE fallback を実行します。それでも閾値を超える候補がなければ LLM 生成を行わず、回答候補は「資料中に該当箇所が見つかりません。」になります。
 
 ## Ollama Generation
 回答生成と SkillUpdater は `GENERATION_PROVIDER=ollama` で Mac host 側の Ollama に切り替えられます。embedding は `EMBEDDING_PROVIDER=local-sentence-transformers` のまま使えます。

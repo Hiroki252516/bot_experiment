@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 class ChatGenerateRequest(BaseModel):
     user_id: str
     question: str
+    document_ids: list[str] | None = None
     course_context: str | None = None
     candidate_count: int = 3
     skills_enabled: bool = True
@@ -25,6 +26,8 @@ class ChatGenerateRequest(BaseModel):
 class RetrievalItemResponse(BaseModel):
     chunk_id: str
     document_id: str
+    filename: str
+    chunk_index: int
     score: float
     text: str
 
@@ -77,4 +80,3 @@ class SessionDetailResponse(BaseModel):
     session_id: str
     user_id: str
     messages: list[SessionMessageDetail]
-

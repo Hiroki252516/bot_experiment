@@ -40,6 +40,7 @@ class Settings(BaseSettings):
 
     default_candidate_count: int = 3
     default_retrieval_top_k: int = 5
+    min_retrieval_score: float = 0.25
     default_chunk_size: int = 1200
     default_chunk_overlap: int = 200
     embedding_dimensions: int = 768

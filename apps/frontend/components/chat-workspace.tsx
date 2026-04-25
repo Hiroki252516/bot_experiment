@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { apiFetch } from "../lib/api";
 
@@ -24,8 +24,16 @@ type ChatGenerateResponse = {
   generation_run_id: string;
   skills_enabled: boolean;
   active_skill_revision_id: string | null;
-  retrievals: Array<{ chunk_id: string; document_id: string; score: number; text: string }>;
+  retrievals: Array<{ chunk_id: string; document_id: string; filename: string; chunk_index: number; score: number; text: string }>;
   candidates: Candidate[];
+};
+
+type DocumentRow = {
+  document_id: string;
+  filename: string;
+  source_type: string;
+  ingest_status: string;
+  created_at: string;
 };
 
 export function ChatWorkspace() {
@@ -35,6 +43,8 @@ export function ChatWorkspace() {
   const [question, setQuestion] = useState("二次方程式の解き方を教えて");
   const [skillsEnabled, setSkillsEnabled] = useState(true);
   const [candidateCount, setCandidateCount] = useState(3);
+  const [documents, setDocuments] = useState<DocumentRow[]>([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [chatResult, setChatResult] = useState<ChatGenerateResponse | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [satisfactionScore, setSatisfactionScore] = useState(8);
@@ -42,6 +52,27 @@ export function ChatWorkspace() {
   const [comment, setComment] = useState("例題つきの説明がわかりやすい");
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
+
+  useEffect(() => {
+    async function refreshDocuments() {
+      try {
+        const response = await apiFetch<DocumentRow[]>("/api/documents");
+        const completedDocuments = response.filter((document) => document.ingest_status === "completed");
+        setDocuments(completedDocuments);
+        setSelectedDocumentIds((current) => {
+          const availableIds = new Set(completedDocuments.map((document) => document.document_id));
+          const stillAvailable = current.filter((documentId) => availableIds.has(documentId));
+          if (stillAvailable.length) return stillAvailable;
+          const latestUploaded = completedDocuments.find((document) => document.source_type !== "seed");
+          const initialDocument = latestUploaded ?? completedDocuments[0];
+          return initialDocument ? [initialDocument.document_id] : [];
+        });
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "教材一覧の取得に失敗しました。");
+      }
+    }
+    refreshDocuments();
+  }, []);
 
   async function ensureUser() {
     if (userId) return userId;
@@ -66,6 +97,7 @@ export function ChatWorkspace() {
           question,
           candidate_count: candidateCount,
           skills_enabled: skillsEnabled,
+          document_ids: selectedDocumentIds.length ? selectedDocumentIds : null,
           session_id: sessionId || null,
           experiment_condition: skillsEnabled ? "skills_on" : "skills_off",
         }),
@@ -78,6 +110,14 @@ export function ChatWorkspace() {
       setError(requestError instanceof Error ? requestError.message : "回答候補の生成に失敗しました。");
       setStatus("");
     }
+  }
+
+  function toggleDocument(documentId: string) {
+    setSelectedDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((selectedDocumentId) => selectedDocumentId !== documentId)
+        : [...current, documentId],
+    );
   }
 
   async function handleSelection(candidateId: string) {
@@ -150,6 +190,28 @@ export function ChatWorkspace() {
                 <option value="off">スキル無効</option>
               </select>
             </label>
+            <div className="field">
+              <span>検索対象教材</span>
+              <div className="stack" style={{ gap: 8 }}>
+                {documents.map((document) => (
+                  <label className="inline" key={document.document_id}>
+                    <input
+                      checked={selectedDocumentIds.includes(document.document_id)}
+                      onChange={() => toggleDocument(document.document_id)}
+                      type="checkbox"
+                    />
+                    <span>
+                      {document.filename}
+                      {document.source_type === "seed" ? " (seed)" : ""}
+                    </span>
+                  </label>
+                ))}
+                {documents.length === 0 ? <p className="muted">completed の教材がありません。管理画面から教材を投入してください。</p> : null}
+                {selectedDocumentIds.length === 0 ? (
+                  <p className="muted">未選択の場合、seed 教材を除いた completed 教材全体から検索します。</p>
+                ) : null}
+              </div>
+            </div>
             <button className="button" type="submit">
               回答候補を生成
             </button>
@@ -198,8 +260,10 @@ export function ChatWorkspace() {
             <div className="stack">
               {chatResult.retrievals.map((retrieval) => (
                 <div className="card" key={retrieval.chunk_id} style={{ padding: 14 }}>
-                  <strong>{retrieval.chunk_id}</strong>
-                  <p className="muted">スコア: {retrieval.score.toFixed(4)}</p>
+                  <strong>{retrieval.filename}</strong>
+                  <p className="muted">
+                    chunk {retrieval.chunk_index} / {retrieval.chunk_id} / スコア: {retrieval.score.toFixed(4)}
+                  </p>
                   <p>{retrieval.text}</p>
                 </div>
               ))}
