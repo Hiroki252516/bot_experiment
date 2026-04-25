@@ -137,6 +137,35 @@ docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
 
 Gemini embedding 由来の既存 vector と local embedding は同じ 768 次元でも混在検索しません。実装上は active `provider_name/model_name/dimensions` で retrieval を絞りますが、検索品質を保つため、provider/model を切り替えた後は対象 document を再 ingest してください。
 
+失敗または途中停止した ingest を再試行したい場合は、対象 document の状態と job 状態を `pending` に戻します。
+
+```sql
+UPDATE rag_documents
+SET ingest_status = 'pending'
+WHERE id = '<document_id>';
+
+UPDATE ingestion_jobs
+SET status = 'pending',
+    error_message = NULL,
+    updated_at = now()
+WHERE document_id = '<document_id>'
+  AND status IN ('failed', 'running');
+```
+
+document 全体を一括で再試行する場合:
+
+```sql
+UPDATE rag_documents
+SET ingest_status = 'pending'
+WHERE ingest_status IN ('failed', 'running');
+
+UPDATE ingestion_jobs
+SET status = 'pending',
+    error_message = NULL,
+    updated_at = now()
+WHERE status IN ('failed', 'running');
+```
+
 ## Tests And Checks
 frontend:
 ```bash

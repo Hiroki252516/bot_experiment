@@ -5,7 +5,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import IngestionJob, SkillUpdateJob, utcnow
+from app.models.entities import IngestionJob, RagDocument, SkillUpdateJob, utcnow
 from app.services.documents import process_ingestion_job
 from app.services.skills import process_skill_update_job
 
@@ -34,6 +34,9 @@ def process_pending_jobs(session: Session, batch_size: int) -> None:
                 failed_job.status = "failed"
                 failed_job.error_message = str(exc)
                 failed_job.updated_at = utcnow()
+                failed_document = session.get(RagDocument, failed_job.document_id)
+                if failed_document:
+                    failed_document.ingest_status = "failed"
                 session.commit()
             logger.exception("Failed ingestion job %s", job.id)
 
