@@ -23,6 +23,23 @@ def _vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{value:.8f}" for value in values) + "]"
 
 
+POSTGRES_RETRIEVAL_SQL = """
+SELECT
+  c.id AS chunk_id,
+  c.document_id AS document_id,
+  c.content AS text,
+  e.model_name AS embedding_model,
+  1 - (e.vector <=> CAST(:vector_literal AS vector)) AS score
+FROM embeddings e
+JOIN rag_document_chunks c ON c.id = e.chunk_id
+WHERE (CAST(:provider_name AS text) IS NULL OR e.provider_name = CAST(:provider_name AS text))
+  AND (CAST(:model_name AS text) IS NULL OR e.model_name = CAST(:model_name AS text))
+  AND (CAST(:dimensions AS integer) IS NULL OR e.dimensions = CAST(:dimensions AS integer))
+ORDER BY e.vector <=> CAST(:vector_literal AS vector)
+LIMIT :top_k
+"""
+
+
 def retrieve_chunks(
     session: Session,
     query_embedding: list[float],
@@ -37,23 +54,7 @@ def retrieve_chunks(
     dialect = session.bind.dialect.name if session.bind else "sqlite"
     if dialect == "postgresql":
         vector_literal = _vector_literal(query_embedding)
-        sql = text(
-            """
-            SELECT
-              c.id AS chunk_id,
-              c.document_id AS document_id,
-              c.content AS text,
-              e.model_name AS embedding_model,
-              1 - (e.vector <=> CAST(:vector_literal AS vector)) AS score
-            FROM embeddings e
-            JOIN rag_document_chunks c ON c.id = e.chunk_id
-            WHERE (:provider_name IS NULL OR e.provider_name = :provider_name)
-              AND (:model_name IS NULL OR e.model_name = :model_name)
-              AND (:dimensions IS NULL OR e.dimensions = :dimensions)
-            ORDER BY e.vector <=> CAST(:vector_literal AS vector)
-            LIMIT :top_k
-            """
-        )
+        sql = text(POSTGRES_RETRIEVAL_SQL)
         rows = session.execute(
             sql,
             {

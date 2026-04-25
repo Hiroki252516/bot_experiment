@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from app.models.entities import Embedding, RagDocument, RagDocumentChunk
-from app.rag.retrieval import retrieve_chunks
+from app.rag.retrieval import POSTGRES_RETRIEVAL_SQL, retrieve_chunks
+
+
+def test_postgres_retrieval_sql_casts_nullable_filter_parameters() -> None:
+    assert "CAST(:provider_name AS text) IS NULL" in POSTGRES_RETRIEVAL_SQL
+    assert "e.provider_name = CAST(:provider_name AS text)" in POSTGRES_RETRIEVAL_SQL
+    assert "CAST(:model_name AS text) IS NULL" in POSTGRES_RETRIEVAL_SQL
+    assert "e.model_name = CAST(:model_name AS text)" in POSTGRES_RETRIEVAL_SQL
+    assert "CAST(:dimensions AS integer) IS NULL" in POSTGRES_RETRIEVAL_SQL
+    assert "e.dimensions = CAST(:dimensions AS integer)" in POSTGRES_RETRIEVAL_SQL
 
 
 def _add_embedding(session, provider_name: str, model_name: str, content: str, vector: list[float]) -> None:
