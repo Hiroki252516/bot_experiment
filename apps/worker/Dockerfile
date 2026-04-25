@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app/apps/backend:/app/apps/worker
+ENV PYTHONPATH=/app/apps/worker:/app/apps/backend
 ENV HF_HOME=/app/model_cache/huggingface
 ENV TRANSFORMERS_CACHE=/app/model_cache/huggingface/transformers
 ENV SENTENCE_TRANSFORMERS_HOME=/app/model_cache/sentence-transformers
@@ -21,4 +21,4 @@ COPY seeds /app/seeds
 
 RUN mkdir -p /app/data/uploads /app/data/exports /app/model_cache/huggingface/transformers /app/model_cache/sentence-transformers
 
-CMD ["python", "-m", "app.main"]
+CMD ["python", "/app/apps/worker/app/main.py"]
