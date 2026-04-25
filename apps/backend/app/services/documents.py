@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 
 from fastapi import UploadFile
@@ -9,9 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.embeddings.providers import get_embedding_provider
-from app.models.entities import Embedding, IngestionJob, RagDocument, RagDocumentChunk, utcnow
+from app.models.entities import Embedding, IngestionJob, RagDocument, RagDocumentChunk, RetrievalLog, utcnow
 from app.rag.chunking import chunk_text
 from app.rag.parsing import parse_document
+
+logger = logging.getLogger(__name__)
 
 
 def save_upload(file: UploadFile) -> tuple[Path, str]:
@@ -64,6 +67,32 @@ def list_chunks(session: Session, document_id: str) -> list[tuple[RagDocumentChu
         has_embedding = session.scalar(select(Embedding.id).where(Embedding.chunk_id == chunk.id)) is not None
         pairs.append((chunk, has_embedding))
     return pairs
+
+
+def delete_document(session: Session, document_id: str) -> None:
+    document = session.get(RagDocument, document_id)
+    if not document:
+        raise ValueError("Document not found")
+
+    storage_path = Path(document.storage_path)
+    chunk_ids = list(
+        session.scalars(select(RagDocumentChunk.id).where(RagDocumentChunk.document_id == document.id))
+    )
+    if chunk_ids:
+        session.execute(delete(RetrievalLog).where(RetrievalLog.chunk_id.in_(chunk_ids)))
+        session.execute(delete(Embedding).where(Embedding.chunk_id.in_(chunk_ids)))
+    session.execute(delete(IngestionJob).where(IngestionJob.document_id == document.id))
+    session.execute(delete(RagDocumentChunk).where(RagDocumentChunk.document_id == document.id))
+    session.execute(delete(RagDocument).where(RagDocument.id == document.id))
+    session.flush()
+
+    try:
+        storage_path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("Failed to delete uploaded document file: %s", storage_path)
+        raise
+
+    session.commit()
 
 
 def process_ingestion_job(session: Session, job: IngestionJob) -> None:

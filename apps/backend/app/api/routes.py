@@ -24,7 +24,7 @@ from app.schemas.chat import (
     SessionDetailResponse,
 )
 from app.schemas.common import HealthResponse
-from app.schemas.document import DocumentChunkResponse, DocumentResponse, IngestJobResponse
+from app.schemas.document import DocumentChunkResponse, DocumentDeleteResponse, DocumentResponse, IngestJobResponse
 from app.schemas.user import SkillSummaryResponse, UserCreateRequest, UserResponse
 from app.services.chat import (
     generate_candidates_for_chat,
@@ -34,7 +34,7 @@ from app.services.chat import (
     get_user_logs,
     select_candidate_for_chat,
 )
-from app.services.documents import create_document, create_ingestion_job, list_chunks, list_documents
+from app.services.documents import create_document, create_ingestion_job, delete_document, list_chunks, list_documents
 from app.services.experiments import create_experiment_run, export_logs_zip, list_experiment_runs
 from app.services.users import create_user, get_user_with_skill
 
@@ -138,6 +138,17 @@ def list_document_chunks_route(document_id: str, session: Session = Depends(get_
         )
         for chunk, has_embedding in list_chunks(session, document_id)
     ]
+
+
+@router.delete("/api/documents/{document_id}", response_model=DocumentDeleteResponse)
+def delete_document_route(document_id: str, session: Session = Depends(get_session)) -> DocumentDeleteResponse:
+    try:
+        delete_document(session, document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete document file: {exc}") from exc
+    return DocumentDeleteResponse(document_id=document_id, deleted=True)
 
 
 @router.post("/api/chat/generate", response_model=ChatGenerateResponse)

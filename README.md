@@ -166,6 +166,8 @@ SET status = 'pending',
 WHERE status IN ('failed', 'running');
 ```
 
+Admin 画面から教材を削除すると、対象の `ingestion_jobs`、`rag_document_chunks`、`embeddings`、該当 chunk に紐づく `retrieval_logs`、`rag_documents`、保存済みファイル本体を hard delete します。実験本番後に削除すると、過去の検索ログや評価データの解釈に影響するため注意してください。研究ログを保持したい段階では、削除前に export を取得するか、将来的な soft delete 化を検討してください。
+
 ## Tests And Checks
 frontend:
 ```bash

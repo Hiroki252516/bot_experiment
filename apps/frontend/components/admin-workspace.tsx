@@ -101,6 +101,22 @@ export function AdminWorkspace() {
     }
   }
 
+  async function handleDeleteDocument(document: DocumentRow) {
+    const confirmed = window.confirm(
+      `教材「${document.filename}」を削除します。取り込みジョブ、チャンク、埋め込み、検索ログ、保存ファイルも削除されます。よろしいですか？`,
+    );
+    if (!confirmed) return;
+    setError("");
+    setStatus("教材を削除しています...");
+    try {
+      await apiFetch(`/api/documents/${document.document_id}`, { method: "DELETE" });
+      setStatus("教材を削除しました。");
+      await refreshDocuments();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "教材の削除に失敗しました。");
+    }
+  }
+
   async function handleLoadHistory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -185,6 +201,7 @@ export function AdminWorkspace() {
                 <th>ファイル名</th>
                 <th>状態</th>
                 <th>種類</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +210,11 @@ export function AdminWorkspace() {
                   <td>{document.filename}</td>
                   <td>{document.ingest_status}</td>
                   <td>{document.mime_type}</td>
+                  <td>
+                    <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
+                      削除
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

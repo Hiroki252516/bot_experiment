@@ -18,10 +18,14 @@ class IngestJobResponse(BaseModel):
     status: str
 
 
+class DocumentDeleteResponse(BaseModel):
+    document_id: str
+    deleted: bool
+
+
 class DocumentChunkResponse(BaseModel):
     chunk_id: str
     chunk_index: int
     content: str
     metadata: dict
     has_embedding: bool
-
