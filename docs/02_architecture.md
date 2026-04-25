@@ -88,18 +88,25 @@
 - skill revisions
 - experiment runs
 
-## 5. LLM Provider abstraction
-`LLMProvider` インターフェースを定義し、少なくとも以下メソッドを持たせる。
+## 5. Provider abstraction
+回答生成・SkillUpdater 用の `GenerationProvider` と、RAG 用の `EmbeddingProvider` を分離する。
+
+`GenerationProvider` は以下メソッドを持つ。
 - `generate_candidates(input) -> CandidateSet`
 - `extract_skill_delta(input) -> SkillDelta`
-- `embed_texts(texts) -> list[vector]`
+
+`EmbeddingProvider` は以下メソッドを持つ。
+- `embed_texts(texts) -> EmbeddingResult`
 
 初期実装:
-- `GeminiProvider`
+- `GeminiGenerationProvider`
+- `LocalSentenceTransformersEmbeddingProvider`
 
 将来:
-- `OpenAIProvider`
-- `MockProvider`（テスト用）
+- `OpenAIGenerationProvider`
+- `GeminiEmbeddingProvider`（比較・後方互換用）
+- `LocalHttpEmbeddingProvider`（Mac host の MPS service 用）
+- `MockGenerationProvider` / `MockEmbeddingProvider`（テスト用）
 
 ## 6. 主要フロー
 ### A. 質問から候補生成まで

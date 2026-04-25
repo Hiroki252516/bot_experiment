@@ -18,12 +18,22 @@ class Settings(BaseSettings):
     upload_dir: Path = Path("/tmp/tutorbot/uploads")
     export_dir: Path = Path("/tmp/tutorbot/exports")
     seed_dir: Path = Path("/tmp/tutorbot/seeds")
+    hf_home: Path = Path("/app/model_cache/huggingface")
+    transformers_cache: Path = Path("/app/model_cache/huggingface/transformers")
+    sentence_transformers_home: Path = Path("/app/model_cache/sentence-transformers")
 
+    generation_provider: str | None = None
+    embedding_provider: str = "local-sentence-transformers"
     llm_provider: str = "gemini"
     gemini_api_key: str = ""
     gemini_model_generate: str = "gemini-2.0-flash"
     gemini_model_embed: str = "gemini-embedding-001"
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    local_embed_model: str = "pkshatech/GLuCoSE-base-ja"
+    local_embed_device: str = "auto"
+    local_embed_batch_size: int = 16
+    local_embed_normalize: bool = True
+    local_embed_http_url: str = "http://host.docker.internal:8088"
 
     default_candidate_count: int = 3
     default_retrieval_top_k: int = 5
@@ -54,9 +64,16 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.backend_cors_origins.split(",") if origin.strip()]
 
+    @property
+    def active_generation_provider(self) -> str:
+        return self.generation_provider or self.llm_provider
+
     def ensure_directories(self) -> None:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.export_dir.mkdir(parents=True, exist_ok=True)
+        self.hf_home.mkdir(parents=True, exist_ok=True)
+        self.transformers_cache.mkdir(parents=True, exist_ok=True)
+        self.sentence_transformers_home.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
@@ -64,4 +81,3 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.ensure_directories()
     return settings
-

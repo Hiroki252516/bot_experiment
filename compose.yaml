@@ -32,6 +32,7 @@ services:
     volumes:
       - uploaded_documents:/app/data/uploads
       - export_artifacts:/app/data/exports
+      - model_cache:/app/model_cache
       - ./seeds:/app/seeds:ro
 
   worker:
@@ -51,6 +52,7 @@ services:
     volumes:
       - uploaded_documents:/app/data/uploads
       - export_artifacts:/app/data/exports
+      - model_cache:/app/model_cache
       - ./seeds:/app/seeds:ro
 
   frontend:
@@ -69,4 +71,4 @@ volumes:
   postgres_data:
   uploaded_documents:
   export_artifacts:
-
+  model_cache:

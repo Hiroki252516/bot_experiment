@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.llm.providers import get_provider
+from app.embeddings.providers import get_embedding_provider
 from app.models.entities import Embedding, IngestionJob, RagDocument, RagDocumentChunk, utcnow
 from app.rag.chunking import chunk_text
 from app.rag.parsing import parse_document
@@ -68,7 +68,7 @@ def list_chunks(session: Session, document_id: str) -> list[tuple[RagDocumentChu
 
 def process_ingestion_job(session: Session, job: IngestionJob) -> None:
     settings = get_settings()
-    provider = get_provider(settings)
+    embedding_provider = get_embedding_provider(settings)
     document = session.get(RagDocument, job.document_id)
     if not document:
         raise ValueError("Document not found")
@@ -90,6 +90,7 @@ def process_ingestion_job(session: Session, job: IngestionJob) -> None:
     session.execute(delete(RagDocumentChunk).where(RagDocumentChunk.document_id == document.id))
     session.flush()
 
+    chunk_rows: list[RagDocumentChunk] = []
     for index, chunk_text_value in enumerate(chunks):
         chunk = RagDocumentChunk(
             document_id=document.id,
@@ -101,13 +102,19 @@ def process_ingestion_job(session: Session, job: IngestionJob) -> None:
         )
         session.add(chunk)
         session.flush()
-        vector = provider.embed_texts([chunk_text_value])[0]
+        chunk_rows.append(chunk)
+
+    embedding_result = embedding_provider.embed_texts(chunks)
+    if len(embedding_result.vectors) != len(chunk_rows):
+        raise RuntimeError("Embedding provider returned a different number of vectors than chunks")
+
+    for chunk, vector in zip(chunk_rows, embedding_result.vectors, strict=True):
         embedding = Embedding(
             chunk_id=chunk.id,
-            provider_name=provider.provider_name,
-            model_name=settings.gemini_model_embed if provider.provider_name == "gemini" else "mock-embedding",
+            provider_name=embedding_result.provider_name,
+            model_name=embedding_result.model_name,
             vector=vector,
-            dimensions=len(vector),
+            dimensions=embedding_result.dimensions,
         )
         session.add(embedding)
 

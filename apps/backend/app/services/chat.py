@@ -4,7 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.llm.providers import get_provider
+from app.embeddings.providers import get_embedding_provider
+from app.llm.providers import get_generation_provider
 from app.models.entities import (
     AnswerCandidate,
     AnswerGenerationRun,
@@ -37,7 +38,8 @@ def _ensure_session(session: Session, user_id: str, session_id: str | None) -> C
 
 def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest) -> dict:
     settings = get_settings()
-    provider = get_provider(settings)
+    generation_provider = get_generation_provider(settings)
+    embedding_provider = get_embedding_provider(settings)
 
     user, skill, active_revision = get_user_with_skill(session, payload.user_id)
     if not user or not skill:
@@ -57,13 +59,21 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
     session.flush()
 
     skill_profile = active_revision.profile_json if payload.skills_enabled and active_revision else settings.default_skill_profile
-    query_embedding = provider.embed_texts([payload.question])[0]
-    retrieval_rows = retrieve_chunks(session, query_embedding, settings.default_retrieval_top_k)
+    query_embedding_result = embedding_provider.embed_texts([payload.question])
+    query_embedding = query_embedding_result.vectors[0]
+    retrieval_rows = retrieve_chunks(
+        session,
+        query_embedding,
+        settings.default_retrieval_top_k,
+        provider_name=query_embedding_result.provider_name,
+        model_name=query_embedding_result.model_name,
+        dimensions=query_embedding_result.dimensions,
+    )
 
     generation = AnswerGenerationRun(
         chat_message_id=message.id,
-        provider_name=provider.provider_name,
-        model_name=settings.gemini_model_generate if provider.provider_name == "gemini" else "mock-model",
+        provider_name=generation_provider.provider_name,
+        model_name=settings.gemini_model_generate if generation_provider.provider_name == "gemini" else "mock-model",
         temperature=settings.generation_temperature,
         top_p=settings.generation_top_p,
         candidate_count=payload.candidate_count,
@@ -74,7 +84,7 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
     session.add(generation)
     session.flush()
 
-    candidate_set, _metadata = provider.generate_candidates(
+    candidate_set, _metadata = generation_provider.generate_candidates(
         question=payload.question,
         retrievals=retrieval_rows,
         skill_profile=skill_profile,

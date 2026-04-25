@@ -19,8 +19,10 @@ Build a research prototype for a personalized tutoring chatbot that:
 - Frontend: Next.js + TypeScript.
 - Database: PostgreSQL 16 + pgvector.
 - Background worker: Python worker service in a separate container.
-- LLM provider abstraction is required.
-- Default LLM provider is Gemini, but implementation must allow future provider replacement.
+- Generation provider abstraction is required.
+- Embedding provider abstraction is required.
+- Default generation provider is Gemini, but implementation must allow future provider replacement.
+- Default RAG embedding provider is local sentence-transformers with CPU fallback in Docker.
 - All environment variables must be loaded from `.env`.
 - Do not hardcode secrets.
 - Write tests for critical paths.

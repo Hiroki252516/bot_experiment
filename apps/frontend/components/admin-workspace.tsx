@@ -35,12 +35,22 @@ type ExperimentRun = {
   created_at: string;
 };
 
+type RuntimeProvider = {
+  generation_provider: string;
+  embedding_provider: string;
+  generation_model: string;
+  embedding_model: string;
+  embedding_dimensions: number;
+  local_embed_device: string;
+};
+
 export function AdminWorkspace() {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [userId, setUserId] = useState("");
   const [skillHistory, setSkillHistory] = useState<SkillHistory | null>(null);
   const [runs, setRuns] = useState<ExperimentRun[]>([]);
+  const [runtime, setRuntime] = useState<RuntimeProvider | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -54,6 +64,11 @@ export function AdminWorkspace() {
   async function refreshRuns() {
     const response = await apiFetch<ExperimentRun[]>("/api/experiments/runs");
     setRuns(response);
+  }
+
+  async function refreshRuntime() {
+    const response = await apiFetch<RuntimeProvider>("/api/admin/runtime");
+    setRuntime(response);
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -111,7 +126,7 @@ export function AdminWorkspace() {
 
   async function handleRefresh() {
     setError("");
-    await Promise.all([refreshDocuments(), refreshRuns()]);
+    await Promise.all([refreshDocuments(), refreshRuns(), refreshRuntime()]);
   }
 
   return (
@@ -133,6 +148,17 @@ export function AdminWorkspace() {
           </div>
           {status ? <p className="muted">{status}</p> : null}
           {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
+          {runtime ? (
+            <div className="card" style={{ padding: 16 }}>
+              <p className="muted">実行設定</p>
+              <p>
+                生成: {runtime.generation_provider} / {runtime.generation_model}
+              </p>
+              <p>
+                埋め込み: {runtime.embedding_provider} / {runtime.embedding_model} / {runtime.embedding_dimensions} 次元 / device={runtime.local_embed_device}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <form className="card stack" onSubmit={handleUpload}>

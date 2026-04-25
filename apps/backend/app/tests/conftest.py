@@ -11,8 +11,13 @@ from sqlalchemy.pool import StaticPool
 
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["GENERATION_PROVIDER"] = "mock"
+os.environ["EMBEDDING_PROVIDER"] = "mock"
 os.environ["UPLOAD_DIR"] = "/tmp/tutorbot-test/uploads"
 os.environ["EXPORT_DIR"] = "/tmp/tutorbot-test/exports"
+os.environ["HF_HOME"] = "/tmp/tutorbot-test/model_cache/huggingface"
+os.environ["TRANSFORMERS_CACHE"] = "/tmp/tutorbot-test/model_cache/huggingface/transformers"
+os.environ["SENTENCE_TRANSFORMERS_HOME"] = "/tmp/tutorbot-test/model_cache/sentence-transformers"
 
 from app.db.base import Base
 from app.db.session import get_session
@@ -54,4 +59,5 @@ def client(session: Session) -> TestClient:
 def ensure_dirs() -> None:
     Path("/tmp/tutorbot-test/uploads").mkdir(parents=True, exist_ok=True)
     Path("/tmp/tutorbot-test/exports").mkdir(parents=True, exist_ok=True)
-
+    Path("/tmp/tutorbot-test/model_cache/huggingface/transformers").mkdir(parents=True, exist_ok=True)
+    Path("/tmp/tutorbot-test/model_cache/sentence-transformers").mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,7 @@
 研究用プロトタイプとして、学習者の回答選択と主観評価をもとにユーザー別 `Skill` を更新し、次回以降の回答生成に反映するローカル実行前提のチュータリングチャットボットです。
 
 ## Repo Structure
-- `apps/backend`: FastAPI API, SQLAlchemy models, Alembic migrations, RAG, LLM abstraction, export logic
+- `apps/backend`: FastAPI API, SQLAlchemy models, Alembic migrations, RAG, generation/embedding provider abstractions, export logic
 - `apps/frontend`: Next.js App Router UI for chat, logs, and admin workflows
 - `apps/worker`: PostgreSQL polling worker for ingestion and skill-update jobs
 - `packages/shared-schemas`: OpenAPI 由来の共有型を置くための予約領域
@@ -27,23 +27,31 @@
 - Frontend: Next.js 15, TypeScript
 - Database: PostgreSQL 16, pgvector
 - Worker: Python polling worker
-- Default LLM provider: Gemini Developer API
-- Test/dev fallback provider: `mock`
+- Default generation provider: Gemini Developer API
+- Default embedding provider: local `sentence-transformers`
+- Test/dev fallback providers: `mock`
 
 ## Environment Setup
 1. `.env` を用意します。
 ```bash
 cp .env.example .env
 ```
-2. Gemini を使う場合は `.env` の `GEMINI_API_KEY` を設定します。
-3. API キーなしでローカル挙動だけ確認したい場合は `.env` の `LLM_PROVIDER=mock` を使ってください。
+2. Gemini で回答生成する場合は `.env` の `GEMINI_API_KEY` を設定します。
+3. API キーなしでローカル挙動だけ確認したい場合は `.env` の `GENERATION_PROVIDER=mock` と `EMBEDDING_PROVIDER=mock` を使ってください。
+4. 既定では RAG embedding に `pkshatech/GLuCoSE-base-ja` を使います。初回 ingest または prefetch 時にモデルをダウンロードし、`model_cache` volume に保存します。
 
 主な環境変数:
 - `DATABASE_URL`
-- `LLM_PROVIDER`
+- `GENERATION_PROVIDER`
+- `EMBEDDING_PROVIDER`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL_GENERATE`
 - `GEMINI_MODEL_EMBED`
+- `LOCAL_EMBED_MODEL`
+- `LOCAL_EMBED_DEVICE`
+- `EMBEDDING_DIMENSIONS`
+- `HF_HOME`
+- `SENTENCE_TRANSFORMERS_HOME`
 - `UPLOAD_DIR`
 - `EXPORT_DIR`
 - `NEXT_PUBLIC_API_BASE_URL`
@@ -109,6 +117,26 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 docker compose run --rm backend python -m app.scripts.seed_sample_data
 ```
 
+## Local Embeddings
+回答生成と SkillUpdater は `GENERATION_PROVIDER` を使い、RAG の document/query embedding は `EMBEDDING_PROVIDER` を使います。既定は以下です。
+
+```env
+GENERATION_PROVIDER=gemini
+EMBEDDING_PROVIDER=local-sentence-transformers
+LOCAL_EMBED_MODEL=pkshatech/GLuCoSE-base-ja
+LOCAL_EMBED_DEVICE=auto
+EMBEDDING_DIMENSIONS=768
+```
+
+Docker Compose 内では CPU fallback を前提にします。Apple Silicon の MPS を使いたい場合、Linux container から直接 MPS を使う前提にはせず、将来用の `EMBEDDING_PROVIDER=local-http` で macOS host 側の embedding service を呼ぶ設計です。
+
+モデルを事前取得したい場合:
+```bash
+docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
+```
+
+Gemini embedding 由来の既存 vector と local embedding は同じ 768 次元でも混在検索しません。実装上は active `provider_name/model_name/dimensions` で retrieval を絞りますが、検索品質を保つため、provider/model を切り替えた後は対象 document を再 ingest してください。
+
 ## Tests And Checks
 frontend:
 ```bash
@@ -124,8 +152,9 @@ docker compose run --rm backend pytest app/tests -q
 ```
 
 ## Notes
-- `GeminiProvider` は Google AI Developer API の `generateContent` / `embedContent` を使う実装です。
-- `MockProvider` は API キーなしで縦スライスを確認するための決定的なテスト用実装です。
+- `GeminiGenerationProvider` は Google AI Developer API の `generateContent` を使う実装です。
+- `GeminiEmbeddingProvider` は後方互換・比較用に残していますが、既定の embedding provider ではありません。
+- `MockGenerationProvider` と `MockEmbeddingProvider` は API キーなしで縦スライスを確認するための決定的なテスト用実装です。
 - skill 更新は `LLM で差分抽出` と `アプリ側の deterministic merge` を分けています。
 - export は単一 CSV ではなく、研究評価向けの複数 CSV を zip 化しています。
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from abc import ABC, abstractmethod
 from typing import Any
@@ -11,7 +10,7 @@ from app.core.config import Settings, get_settings
 from app.schemas.llm import GeneratedCandidateSet, ProviderMetadata, SkillDelta
 
 
-class LLMProvider(ABC):
+class GenerationProvider(ABC):
     provider_name: str
 
     def __init__(self, settings: Settings) -> None:
@@ -38,19 +37,9 @@ class LLMProvider(ABC):
     ) -> tuple[SkillDelta, ProviderMetadata]:
         raise NotImplementedError
 
-    @abstractmethod
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        raise NotImplementedError
 
-
-class MockProvider(LLMProvider):
+class MockGenerationProvider(GenerationProvider):
     provider_name = "mock"
-
-    def _deterministic_vector(self, text: str) -> list[float]:
-        dims = self.settings.embedding_dimensions
-        digest = hashlib.sha256(text.encode("utf-8")).digest()
-        values = [(digest[index % len(digest)] / 255.0) for index in range(dims)]
-        return values
 
     def generate_candidates(
         self,
@@ -139,11 +128,8 @@ class MockProvider(LLMProvider):
             ),
         )
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        return [self._deterministic_vector(text) for text in texts]
 
-
-class GeminiProvider(LLMProvider):
+class GeminiGenerationProvider(GenerationProvider):
     provider_name = "gemini"
 
     def _client(self) -> httpx.Client:
@@ -155,7 +141,7 @@ class GeminiProvider(LLMProvider):
 
     def _generate_json(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
         if not self.settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini")
+            raise RuntimeError("GEMINI_API_KEY is required when GENERATION_PROVIDER=gemini")
         body = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
@@ -275,28 +261,18 @@ class GeminiProvider(LLMProvider):
             ),
         )
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        if not self.settings.gemini_api_key:
-            raise RuntimeError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini")
-        with self._client() as client:
-            vectors: list[list[float]] = []
-            for text in texts:
-                body = {
-                    "model": f"models/{self.settings.gemini_model_embed}",
-                    "content": {"parts": [{"text": text}]},
-                }
-                response = client.post(f"/models/{self.settings.gemini_model_embed}:embedContent", json=body)
-                response.raise_for_status()
-                payload = response.json()
-                vectors.append(payload["embedding"]["values"])
-            return vectors
 
-
-def get_provider(settings: Settings | None = None) -> LLMProvider:
+def get_generation_provider(settings: Settings | None = None) -> GenerationProvider:
     active_settings = settings or get_settings()
-    if active_settings.llm_provider == "mock":
-        return MockProvider(active_settings)
-    if active_settings.llm_provider == "gemini":
-        return GeminiProvider(active_settings)
-    raise ValueError(f"Unsupported provider: {active_settings.llm_provider}")
+    provider_name = active_settings.active_generation_provider
+    if provider_name == "mock":
+        return MockGenerationProvider(active_settings)
+    if provider_name == "gemini":
+        return GeminiGenerationProvider(active_settings)
+    raise ValueError(f"Unsupported generation provider: {provider_name}")
 
+
+LLMProvider = GenerationProvider
+MockProvider = MockGenerationProvider
+GeminiProvider = GeminiGenerationProvider
+get_provider = get_generation_provider

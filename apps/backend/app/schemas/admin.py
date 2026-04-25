@@ -15,6 +15,15 @@ class AdminRecomputeResponse(BaseModel):
     status: str
 
 
+class RuntimeProviderResponse(BaseModel):
+    generation_provider: str
+    embedding_provider: str
+    generation_model: str
+    embedding_model: str
+    embedding_dimensions: int
+    local_embed_device: str
+
+
 class ExperimentRunCreateRequest(BaseModel):
     user_id: str
     chat_message_id: str
@@ -33,4 +42,3 @@ class ExperimentRunResponse(BaseModel):
     candidate_count: int
     notes: str | None
     created_at: datetime
-

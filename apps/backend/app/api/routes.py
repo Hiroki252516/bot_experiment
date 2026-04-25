@@ -8,10 +8,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_session
+from app.core.config import get_settings
 from app.schemas.admin import (
     AdminRecomputeResponse,
     ExperimentRunCreateRequest,
     ExperimentRunResponse,
+    RuntimeProviderResponse,
     SkillHistoryResponse,
 )
 from app.schemas.chat import (
@@ -242,6 +244,28 @@ def recompute_skills_route(user_id: str, session: Session = Depends(get_session)
     session.add(new_job)
     session.commit()
     return AdminRecomputeResponse(skill_update_job_id=new_job.id, status=new_job.status)
+
+
+@router.get("/api/admin/runtime", response_model=RuntimeProviderResponse)
+def get_runtime_route() -> RuntimeProviderResponse:
+    settings = get_settings()
+    embedding_model = (
+        settings.gemini_model_embed
+        if settings.embedding_provider == "gemini"
+        else settings.local_embed_model
+        if settings.embedding_provider in {"local-sentence-transformers", "local-http"}
+        else "mock-embedding"
+    )
+    return RuntimeProviderResponse(
+        generation_provider=settings.active_generation_provider,
+        embedding_provider=settings.embedding_provider,
+        generation_model=settings.gemini_model_generate
+        if settings.active_generation_provider == "gemini"
+        else "mock-model",
+        embedding_model=embedding_model,
+        embedding_dimensions=settings.embedding_dimensions,
+        local_embed_device=settings.local_embed_device,
+    )
 
 
 @router.get("/api/admin/skills/history/{user_id}", response_model=SkillHistoryResponse)

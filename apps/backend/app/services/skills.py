@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.llm.providers import get_provider
+from app.llm.providers import get_generation_provider
 from app.models.entities import (
     AnswerCandidate,
     AnswerGenerationRun,
@@ -20,7 +20,7 @@ from app.skills.merger import merge_skill_profile
 
 def process_skill_update_job(session: Session, job: SkillUpdateJob) -> None:
     settings = get_settings()
-    provider = get_provider(settings)
+    provider = get_generation_provider(settings)
 
     message = session.get(ChatMessage, job.chat_message_id)
     selection = session.get(AnswerSelection, job.selection_id) if job.selection_id else None
@@ -82,4 +82,3 @@ def process_skill_update_job(session: Session, job: SkillUpdateJob) -> None:
     job.error_message = None
     job.updated_at = utcnow()
     session.commit()
-

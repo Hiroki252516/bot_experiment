@@ -2,12 +2,19 @@ services:
   backend:
     environment:
       APP_ENV: research
+      EMBEDDING_PROVIDER: local-sentence-transformers
+      LOCAL_EMBED_MODEL: pkshatech/GLuCoSE-base-ja
+      LOCAL_EMBED_DEVICE: auto
+      EMBEDDING_DIMENSIONS: 768
 
   worker:
     environment:
       APP_ENV: research
+      EMBEDDING_PROVIDER: local-sentence-transformers
+      LOCAL_EMBED_MODEL: pkshatech/GLuCoSE-base-ja
+      LOCAL_EMBED_DEVICE: auto
+      EMBEDDING_DIMENSIONS: 768
 
   frontend:
     environment:
       NODE_ENV: production
-

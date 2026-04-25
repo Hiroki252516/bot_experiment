@@ -27,6 +27,9 @@ def retrieve_chunks(
     session: Session,
     query_embedding: list[float],
     top_k: int,
+    provider_name: str | None = None,
+    model_name: str | None = None,
+    dimensions: int | None = None,
 ) -> list[dict[str, Any]]:
     if not query_embedding:
         return []
@@ -44,17 +47,35 @@ def retrieve_chunks(
               1 - (e.vector <=> CAST(:vector_literal AS vector)) AS score
             FROM embeddings e
             JOIN rag_document_chunks c ON c.id = e.chunk_id
+            WHERE (:provider_name IS NULL OR e.provider_name = :provider_name)
+              AND (:model_name IS NULL OR e.model_name = :model_name)
+              AND (:dimensions IS NULL OR e.dimensions = :dimensions)
             ORDER BY e.vector <=> CAST(:vector_literal AS vector)
             LIMIT :top_k
             """
         )
-        rows = session.execute(sql, {"vector_literal": vector_literal, "top_k": top_k}).mappings().all()
+        rows = session.execute(
+            sql,
+            {
+                "vector_literal": vector_literal,
+                "top_k": top_k,
+                "provider_name": provider_name,
+                "model_name": model_name,
+                "dimensions": dimensions,
+            },
+        ).mappings().all()
         return [dict(row) for row in rows]
 
     query: Select = (
         select(Embedding, RagDocumentChunk)
         .join(RagDocumentChunk, RagDocumentChunk.id == Embedding.chunk_id)
     )
+    if provider_name is not None:
+        query = query.where(Embedding.provider_name == provider_name)
+    if model_name is not None:
+        query = query.where(Embedding.model_name == model_name)
+    if dimensions is not None:
+        query = query.where(Embedding.dimensions == dimensions)
     rows = session.execute(query).all()
     scored: list[dict[str, Any]] = []
     for embedding, chunk in rows:
@@ -76,4 +97,3 @@ def has_embeddings(session: Session) -> bool:
     settings = get_settings()
     _ = settings
     return session.query(Embedding).first() is not None
-

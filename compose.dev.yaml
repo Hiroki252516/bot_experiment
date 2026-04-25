@@ -2,23 +2,27 @@ services:
   backend:
     environment:
       APP_ENV: development
+      LOCAL_EMBED_DEVICE: auto
     volumes:
       - ./apps/backend:/app/apps/backend
       - ./apps/worker:/app/apps/worker
       - ./packages:/app/packages
       - uploaded_documents:/app/data/uploads
       - export_artifacts:/app/data/exports
+      - model_cache:/app/model_cache
       - ./seeds:/app/seeds:ro
 
   worker:
     environment:
       APP_ENV: development
+      LOCAL_EMBED_DEVICE: auto
     volumes:
       - ./apps/backend:/app/apps/backend
       - ./apps/worker:/app/apps/worker
       - ./packages:/app/packages
       - uploaded_documents:/app/data/uploads
       - export_artifacts:/app/data/exports
+      - model_cache:/app/model_cache
       - ./seeds:/app/seeds:ro
 
   frontend:
@@ -39,4 +43,3 @@ services:
         condition: service_healthy
     ports:
       - "5050:80"
-
