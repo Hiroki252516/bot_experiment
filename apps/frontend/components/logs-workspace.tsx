@@ -41,7 +41,7 @@ export function LogsWorkspace() {
       const response = await apiFetch<SessionLog[]>(`/api/chat/logs/${userId}`);
       setLogs(response);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Failed to load logs");
+      setError(requestError instanceof Error ? requestError.message : "会話ログの取得に失敗しました。");
       setLogs([]);
     }
   }
@@ -50,17 +50,17 @@ export function LogsWorkspace() {
     <div className="stack">
       <section className="card stack">
         <div>
-          <p className="muted">Chat Log Explorer</p>
-          <h1>Inspect sessions, candidates, retrievals, and feedback</h1>
+          <p className="muted">会話ログ確認</p>
+          <h1>セッション、回答候補、検索結果、評価を確認</h1>
         </div>
         <form className="grid-2" onSubmit={handleLoad}>
           <label className="field">
-            <span>User ID</span>
-            <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Enter the learner user_id" />
+            <span>ユーザーID</span>
+            <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="学習者の user_id を入力" />
           </label>
           <div style={{ alignSelf: "end" }}>
             <button className="button" type="submit">
-              Load chat logs
+              会話ログを読み込む
             </button>
           </div>
         </form>
@@ -70,8 +70,8 @@ export function LogsWorkspace() {
       {logs.map((session) => (
         <section className="card stack" key={session.session_id}>
           <div>
-            <h2>Session {session.session_id}</h2>
-            <p className="muted">User: {session.user_id}</p>
+            <h2>セッション {session.session_id}</h2>
+            <p className="muted">ユーザー: {session.user_id}</p>
           </div>
           {session.messages.map((message) => (
             <article className="card stack" key={message.chat_message_id} style={{ padding: 16 }}>
@@ -79,7 +79,7 @@ export function LogsWorkspace() {
                 <p className="muted">{new Date(message.created_at).toLocaleString()}</p>
                 <h3>{message.question_text}</h3>
                 <p className="muted">
-                  skills_enabled={String(message.skills_enabled)} / active_revision={message.active_skill_revision_id ?? "none"}
+                  スキル有効={String(message.skills_enabled)} / 有効リビジョン={message.active_skill_revision_id ?? "なし"}
                 </p>
               </div>
               <div className="grid-3">
@@ -99,20 +99,20 @@ export function LogsWorkspace() {
               </div>
               <div className="grid-2">
                 <div className="card" style={{ padding: 14 }}>
-                  <strong>Selection</strong>
+                  <strong>選択結果</strong>
                   {message.selection ? (
                     <>
-                      <p className="muted">Selected candidate: {message.selection.selected_candidate_id}</p>
-                      <p className="muted">Satisfaction: {message.selection.satisfaction_score}</p>
-                      <p className="muted">Clarity: {message.selection.clarity_score}</p>
+                      <p className="muted">選択候補: {message.selection.selected_candidate_id}</p>
+                      <p className="muted">満足度: {message.selection.satisfaction_score}</p>
+                      <p className="muted">わかりやすさ: {message.selection.clarity_score}</p>
                       <p>{message.selection.comment}</p>
                     </>
                   ) : (
-                    <p className="muted">No selection saved yet.</p>
+                    <p className="muted">まだ選択結果は保存されていません。</p>
                   )}
                 </div>
                 <div className="card" style={{ padding: 14 }}>
-                  <strong>Retrievals</strong>
+                  <strong>検索結果</strong>
                   {message.retrievals.length ? (
                     message.retrievals.map((retrieval) => (
                       <div key={retrieval.chunk_id}>
@@ -123,7 +123,7 @@ export function LogsWorkspace() {
                       </div>
                     ))
                   ) : (
-                    <p className="muted">No retrieval log saved.</p>
+                    <p className="muted">検索ログは保存されていません。</p>
                   )}
                 </div>
               </div>
@@ -134,4 +134,3 @@ export function LogsWorkspace() {
     </div>
   );
 }
-

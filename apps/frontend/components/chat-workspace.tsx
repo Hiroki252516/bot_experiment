@@ -29,7 +29,7 @@ type ChatGenerateResponse = {
 };
 
 export function ChatWorkspace() {
-  const [displayName, setDisplayName] = useState("Research Learner");
+  const [displayName, setDisplayName] = useState("研究参加者");
   const [userId, setUserId] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [question, setQuestion] = useState("二次方程式の解き方を教えて");
@@ -56,7 +56,7 @@ export function ChatWorkspace() {
   async function handleGenerate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setStatus("Generating candidates...");
+    setStatus("回答候補を生成しています...");
     try {
       const resolvedUserId = await ensureUser();
       const response = await apiFetch<ChatGenerateResponse>("/api/chat/generate", {
@@ -73,9 +73,9 @@ export function ChatWorkspace() {
       setChatResult(response);
       setSessionId(response.session_id);
       setSelectedCandidateId(response.candidates[0]?.candidate_id ?? "");
-      setStatus("Candidates generated.");
+      setStatus("回答候補を生成しました。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Generation failed");
+      setError(requestError instanceof Error ? requestError.message : "回答候補の生成に失敗しました。");
       setStatus("");
     }
   }
@@ -83,7 +83,7 @@ export function ChatWorkspace() {
   async function handleSelection(candidateId: string) {
     if (!chatResult) return;
     setError("");
-    setStatus("Saving selection...");
+    setStatus("選択結果を保存しています...");
     try {
       await apiFetch("/api/chat/select", {
         method: "POST",
@@ -96,9 +96,9 @@ export function ChatWorkspace() {
         }),
       });
       setSelectedCandidateId(candidateId);
-      setStatus("Selection saved. Worker will update the skill revision.");
+      setStatus("選択結果を保存しました。ワーカーがスキル履歴を更新します。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Selection failed");
+      setError(requestError instanceof Error ? requestError.message : "選択結果の保存に失敗しました。");
       setStatus("");
     }
   }
@@ -108,30 +108,30 @@ export function ChatWorkspace() {
       <section className="hero">
         <div className="card stack">
           <div>
-            <p className="muted">Research Prototype</p>
-            <h1>Adaptive tutoring with answer-choice feedback</h1>
+            <p className="muted">研究用プロトタイプ</p>
+            <h1>回答選択で個人化する学習支援チャット</h1>
             <p className="muted">
-              Generate three answer candidates, let the learner choose one, and feed that back into the next turn.
+              質問に対して複数の回答候補を生成し、学習者の選択を次回以降の説明方針に反映します。
             </p>
           </div>
           <form className="stack" onSubmit={handleGenerate}>
             <div className="grid-2">
               <label className="field">
-                <span>Display name</span>
+                <span>表示名</span>
                 <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
               </label>
               <label className="field">
-                <span>User ID</span>
-                <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Auto-created if blank" />
+                <span>ユーザーID</span>
+                <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="空欄なら自動作成" />
               </label>
             </div>
             <div className="grid-2">
               <label className="field">
-                <span>Session ID</span>
-                <input value={sessionId} onChange={(event) => setSessionId(event.target.value)} placeholder="Continue a previous chat session" />
+                <span>セッションID</span>
+                <input value={sessionId} onChange={(event) => setSessionId(event.target.value)} placeholder="既存セッションを続ける場合に入力" />
               </label>
               <label className="field">
-                <span>Candidate count</span>
+                <span>回答候補数</span>
                 <select value={candidateCount} onChange={(event) => setCandidateCount(Number(event.target.value))}>
                   <option value={3}>3</option>
                   <option value={2}>2</option>
@@ -140,42 +140,42 @@ export function ChatWorkspace() {
               </label>
             </div>
             <label className="field">
-              <span>Question</span>
+              <span>質問</span>
               <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
             </label>
             <label className="field">
-              <span>Experiment condition</span>
+              <span>実験条件</span>
               <select value={skillsEnabled ? "on" : "off"} onChange={(event) => setSkillsEnabled(event.target.value === "on")}>
-                <option value="on">skills_enabled = true</option>
-                <option value="off">skills_enabled = false</option>
+                <option value="on">スキル有効</option>
+                <option value="off">スキル無効</option>
               </select>
             </label>
             <button className="button" type="submit">
-              Generate candidates
+              回答候補を生成
             </button>
           </form>
         </div>
 
         <div className="card stack">
           <div>
-            <h2>Selection feedback</h2>
-            <p className="muted">These values are submitted when a candidate is selected.</p>
+            <h2>選択時フィードバック</h2>
+            <p className="muted">候補を選ぶときに、主観評価として一緒に保存します。</p>
           </div>
           <label className="field">
-            <span>Satisfaction (1-10)</span>
+            <span>満足度 (1-10)</span>
             <input type="number" min={1} max={10} value={satisfactionScore} onChange={(event) => setSatisfactionScore(Number(event.target.value))} />
           </label>
           <label className="field">
-            <span>Clarity (1-10)</span>
+            <span>わかりやすさ (1-10)</span>
             <input type="number" min={1} max={10} value={clarityScore} onChange={(event) => setClarityScore(Number(event.target.value))} />
           </label>
           <label className="field">
-            <span>Comment</span>
+            <span>コメント</span>
             <textarea value={comment} onChange={(event) => setComment(event.target.value)} />
           </label>
           <div className="card" style={{ padding: 14 }}>
-            <strong>Current status</strong>
-            <p className="muted">{status || "Idle"}</p>
+            <strong>現在の状態</strong>
+            <p className="muted">{status || "待機中"}</p>
             {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
           </div>
         </div>
@@ -186,24 +186,24 @@ export function ChatWorkspace() {
           <div className="card stack">
             <div className="grid-2">
               <div>
-                <h2>Run metadata</h2>
-                <p className="muted">Session: {chatResult.session_id}</p>
-                <p className="muted">Chat message: {chatResult.chat_message_id}</p>
+                <h2>生成メタデータ</h2>
+                <p className="muted">セッション: {chatResult.session_id}</p>
+                <p className="muted">質問ターン: {chatResult.chat_message_id}</p>
               </div>
               <div>
-                <h2>Retrievals</h2>
-                <p className="muted">{chatResult.retrievals.length} chunk(s) were used.</p>
+                <h2>検索結果</h2>
+                <p className="muted">{chatResult.retrievals.length} 件のチャンクを参照しました。</p>
               </div>
             </div>
             <div className="stack">
               {chatResult.retrievals.map((retrieval) => (
                 <div className="card" key={retrieval.chunk_id} style={{ padding: 14 }}>
                   <strong>{retrieval.chunk_id}</strong>
-                  <p className="muted">Score: {retrieval.score.toFixed(4)}</p>
+                  <p className="muted">スコア: {retrieval.score.toFixed(4)}</p>
                   <p>{retrieval.text}</p>
                 </div>
               ))}
-              {chatResult.retrievals.length === 0 ? <p className="muted">No indexed chunks yet. Ingest a document from Admin first.</p> : null}
+              {chatResult.retrievals.length === 0 ? <p className="muted">まだ検索対象のチャンクがありません。管理画面から教材を投入してください。</p> : null}
             </div>
           </div>
 
@@ -211,7 +211,7 @@ export function ChatWorkspace() {
             {chatResult.candidates.map((candidate) => (
               <article className="candidate" key={candidate.candidate_id}>
                 <div>
-                  <p className="muted">Candidate {candidate.rank}</p>
+                  <p className="muted">候補 {candidate.rank}</p>
                   <h3>{candidate.title}</h3>
                 </div>
                 <div className="tag-row">
@@ -223,7 +223,7 @@ export function ChatWorkspace() {
                 </div>
                 <p>{candidate.answer_text}</p>
                 <button className={selectedCandidateId === candidate.candidate_id ? "button secondary" : "button"} onClick={() => handleSelection(candidate.candidate_id)} type="button">
-                  {selectedCandidateId === candidate.candidate_id ? "Selected" : "Choose this answer"}
+                  {selectedCandidateId === candidate.candidate_id ? "選択中" : "この回答を選ぶ"}
                 </button>
               </article>
             ))}
@@ -233,4 +233,3 @@ export function ChatWorkspace() {
     </div>
   );
 }
-

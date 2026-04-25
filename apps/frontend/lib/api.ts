@@ -12,7 +12,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
+    throw new Error(text || `リクエストに失敗しました。ステータス: ${response.status}`);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -23,4 +23,3 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 export const getApiBaseUrl = () => API_BASE_URL;
-

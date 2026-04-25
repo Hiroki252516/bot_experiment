@@ -64,7 +64,7 @@ export function AdminWorkspace() {
     event.preventDefault();
     if (!selectedFile) return;
     setError("");
-    setStatus("Uploading document...");
+    setStatus("教材をアップロードしています...");
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
@@ -79,10 +79,10 @@ export function AdminWorkspace() {
       await apiFetch(`/api/documents/${document.document_id}/ingest`, {
         method: "POST",
       });
-      setStatus("Upload complete. Ingestion job queued.");
+      setStatus("アップロードが完了しました。取り込みジョブを登録しました。");
       await refreshDocuments();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Upload failed");
+      setError(requestError instanceof Error ? requestError.message : "アップロードに失敗しました。");
     }
   }
 
@@ -93,7 +93,7 @@ export function AdminWorkspace() {
       const response = await apiFetch<SkillHistory>(`/api/admin/skills/history/${userId}`);
       setSkillHistory(response);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Failed to load skill history");
+      setError(requestError instanceof Error ? requestError.message : "スキル履歴の取得に失敗しました。");
       setSkillHistory(null);
     }
   }
@@ -103,9 +103,9 @@ export function AdminWorkspace() {
     setError("");
     try {
       await apiFetch(`/api/admin/skills/recompute/${userId}`, { method: "POST" });
-      setStatus("Skill recompute job queued.");
+      setStatus("スキル再計算ジョブを登録しました。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Recompute failed");
+      setError(requestError instanceof Error ? requestError.message : "スキル再計算に失敗しました。");
     }
   }
 
@@ -119,16 +119,16 @@ export function AdminWorkspace() {
       <section className="hero">
         <div className="card stack">
           <div>
-            <p className="muted">Admin / Experiment</p>
-            <h1>Research operations</h1>
-            <p className="muted">Upload materials, inspect skill revision history, and export experiment logs.</p>
+            <p className="muted">管理 / 実験</p>
+            <h1>研究用の操作</h1>
+            <p className="muted">教材投入、スキル履歴の確認、実験ログの出力を行います。</p>
           </div>
           <div className="grid-2">
             <button className="button" onClick={handleRefresh} type="button">
-              Refresh documents and runs
+              教材と実験ログを更新
             </button>
             <a className="button secondary" href={exportUrl}>
-              Download logs.zip
+              logs.zip をダウンロード
             </a>
           </div>
           {status ? <p className="muted">{status}</p> : null}
@@ -137,28 +137,28 @@ export function AdminWorkspace() {
 
         <form className="card stack" onSubmit={handleUpload}>
           <div>
-            <h2>Document ingestion</h2>
-            <p className="muted">Upload `pdf`, `md`, or `txt`, then queue ingestion for worker processing.</p>
+            <h2>教材の取り込み</h2>
+            <p className="muted">`pdf`、`md`、`txt` をアップロードし、ワーカー処理用の取り込みジョブを登録します。</p>
           </div>
           <label className="field">
-            <span>File</span>
+            <span>ファイル</span>
             <input accept=".pdf,.md,.txt,text/plain,application/pdf,text/markdown" onChange={handleFileChange} type="file" />
           </label>
           <button className="button" type="submit">
-            Upload and queue ingestion
+            アップロードして取り込みを登録
           </button>
         </form>
       </section>
 
       <section className="grid-2">
         <div className="card stack">
-          <h2>Indexed documents</h2>
+          <h2>投入済み教材</h2>
           <table className="table">
             <thead>
               <tr>
-                <th>Filename</th>
-                <th>Status</th>
-                <th>Type</th>
+                <th>ファイル名</th>
+                <th>状態</th>
+                <th>種類</th>
               </tr>
             </thead>
             <tbody>
@@ -174,13 +174,13 @@ export function AdminWorkspace() {
         </div>
 
         <div className="card stack">
-          <h2>Experiment runs</h2>
+          <h2>実験ログ</h2>
           <table className="table">
             <thead>
               <tr>
-                <th>Condition</th>
-                <th>User</th>
-                <th>Skills</th>
+                <th>条件</th>
+                <th>ユーザー</th>
+                <th>スキル</th>
               </tr>
             </thead>
             <tbody>
@@ -198,20 +198,20 @@ export function AdminWorkspace() {
 
       <section className="card stack">
         <div>
-          <h2>Skill history</h2>
-          <p className="muted">Load revisions for a user and optionally queue recomputation from the latest selection.</p>
+          <h2>スキル履歴</h2>
+          <p className="muted">ユーザーごとのリビジョンを確認し、必要に応じて最新の選択結果から再計算します。</p>
         </div>
         <form className="grid-2" onSubmit={handleLoadHistory}>
           <label className="field">
-            <span>User ID</span>
-            <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Enter a learner user_id" />
+            <span>ユーザーID</span>
+            <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="学習者の user_id を入力" />
           </label>
           <div style={{ alignSelf: "end", display: "flex", gap: 12 }}>
             <button className="button secondary" onClick={handleRecompute} type="button">
-              Recompute skills
+              スキルを再計算
             </button>
             <button className="button" type="submit">
-              Load history
+              履歴を読み込む
             </button>
           </div>
         </form>
@@ -219,7 +219,7 @@ export function AdminWorkspace() {
           <div className="stack">
             {skillHistory.revisions.map((revision) => (
               <article className="card" key={revision.revision_id} style={{ padding: 16 }}>
-                <p className="muted">Revision {revision.revision_number}</p>
+                <p className="muted">リビジョン {revision.revision_number}</p>
                 <strong>{revision.summary_rule}</strong>
                 <p>{revision.update_reason}</p>
                 <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(revision.profile_json, null, 2)}</pre>
@@ -227,10 +227,9 @@ export function AdminWorkspace() {
             ))}
           </div>
         ) : (
-          <p className="muted">No history loaded yet.</p>
+          <p className="muted">まだ履歴は読み込まれていません。</p>
         )}
       </section>
     </div>
   );
 }
-
