@@ -262,6 +262,164 @@ class GeminiGenerationProvider(GenerationProvider):
         )
 
 
+class OllamaGenerationProvider(GenerationProvider):
+    provider_name = "ollama"
+
+    def _client(self) -> httpx.Client:
+        return httpx.Client(
+            base_url=self.settings.ollama_base_url,
+            headers={"Content-Type": "application/json"},
+            timeout=self.settings.ollama_request_timeout_seconds,
+        )
+
+    def _generate_json(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
+        body = {
+            "model": self.settings.ollama_model_generate,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "format": schema,
+            "options": {
+                "temperature": self.settings.generation_temperature,
+                "top_p": self.settings.generation_top_p,
+            },
+        }
+        with self._client() as client:
+            response = client.post("/api/chat", json=body)
+            response.raise_for_status()
+            payload = response.json()
+
+        try:
+            content = payload["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError("Ollama response missing message.content") from exc
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Ollama returned invalid JSON: {exc.msg}") from exc
+        return {"parsed": parsed, "raw": payload}
+
+    def generate_candidates(
+        self,
+        question: str,
+        retrievals: list[dict],
+        skill_profile: dict,
+        candidate_count: int,
+        skills_enabled: bool,
+    ) -> tuple[GeneratedCandidateSet, ProviderMetadata]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "minItems": candidate_count,
+                    "maxItems": candidate_count,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "style_tags": {"type": "array", "items": {"type": "string"}},
+                            "answer_text": {"type": "string"},
+                            "rationale": {"type": "string"},
+                        },
+                        "required": ["title", "style_tags", "answer_text", "rationale"],
+                    },
+                }
+            },
+            "required": ["candidates"],
+        }
+        prompt = (
+            "You are generating tutoring answer candidates for a research system.\n"
+            "Return only JSON that matches the provided schema. Do not include markdown or commentary.\n"
+            f"Question: {question}\n"
+            f"Candidate count: {candidate_count}\n"
+            f"Skills enabled: {skills_enabled}\n"
+            f"Current skill profile JSON: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"Retrieved contexts JSON: {json.dumps(retrievals, ensure_ascii=False)}\n"
+            "Return exactly the requested number of distinct learner-facing candidates."
+        )
+        try:
+            result = self._generate_json(prompt, schema)
+            parsed = GeneratedCandidateSet.model_validate(result["parsed"])
+            if len(parsed.candidates) != candidate_count:
+                raise RuntimeError(
+                    f"Ollama candidate generation returned {len(parsed.candidates)} candidates; "
+                    f"expected {candidate_count}"
+                )
+            metadata = ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.ollama_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            )
+            return parsed, metadata
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Ollama candidate generation failed: {exc}") from exc
+
+    def extract_skill_delta(
+        self,
+        previous_skill: dict,
+        chosen_candidate: dict,
+        rejected_candidates: list[dict],
+        user_comment: str | None,
+    ) -> tuple[SkillDelta, ProviderMetadata]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "add_preferences": {
+                    "type": "object",
+                    "properties": {
+                        "preferred_explanation_style": {"type": "array", "items": {"type": "string"}},
+                        "preferred_structure_pattern": {"type": "array", "items": {"type": "string"}},
+                        "preferred_hint_level": {"type": ["string", "null"]},
+                        "preferred_answer_length": {"type": ["string", "null"]},
+                        "evidence_preference": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "preferred_explanation_style",
+                        "preferred_structure_pattern",
+                        "preferred_hint_level",
+                        "preferred_answer_length",
+                        "evidence_preference",
+                    ],
+                },
+                "add_dislikes": {"type": "array", "items": {"type": "string"}},
+                "summary_rule": {"type": "string"},
+            },
+            "required": ["add_preferences", "add_dislikes", "summary_rule"],
+        }
+        prompt = (
+            "You are extracting reusable learner preference rules.\n"
+            "Return only JSON that matches the provided schema. Do not include markdown or commentary.\n"
+            f"Previous skill profile JSON: {json.dumps(previous_skill, ensure_ascii=False)}\n"
+            f"Chosen candidate JSON: {json.dumps(chosen_candidate, ensure_ascii=False)}\n"
+            f"Rejected candidates JSON: {json.dumps(rejected_candidates, ensure_ascii=False)}\n"
+            f"User comment: {user_comment or ''}\n"
+            "Return normalized preference deltas only."
+        )
+        try:
+            result = self._generate_json(prompt, schema)
+            delta = SkillDelta.model_validate(result["parsed"])
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Ollama skill delta extraction failed: {exc}") from exc
+        return (
+            delta,
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.ollama_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+
 def get_generation_provider(settings: Settings | None = None) -> GenerationProvider:
     active_settings = settings or get_settings()
     provider_name = active_settings.active_generation_provider
@@ -269,10 +427,24 @@ def get_generation_provider(settings: Settings | None = None) -> GenerationProvi
         return MockGenerationProvider(active_settings)
     if provider_name == "gemini":
         return GeminiGenerationProvider(active_settings)
+    if provider_name == "ollama":
+        return OllamaGenerationProvider(active_settings)
     raise ValueError(f"Unsupported generation provider: {provider_name}")
+
+
+def get_generation_model_name(settings: Settings, provider_name: str | None = None) -> str:
+    active_provider = provider_name or settings.active_generation_provider
+    if active_provider == "gemini":
+        return settings.gemini_model_generate
+    if active_provider == "ollama":
+        return settings.ollama_model_generate
+    if active_provider == "mock":
+        return "mock-model"
+    return "unknown"
 
 
 LLMProvider = GenerationProvider
 MockProvider = MockGenerationProvider
 GeminiProvider = GeminiGenerationProvider
+OllamaProvider = OllamaGenerationProvider
 get_provider = get_generation_provider

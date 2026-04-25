@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_session
 from app.core.config import get_settings
+from app.llm.providers import get_generation_model_name
 from app.schemas.admin import (
     AdminRecomputeResponse,
     ExperimentRunCreateRequest,
@@ -270,9 +271,7 @@ def get_runtime_route() -> RuntimeProviderResponse:
     return RuntimeProviderResponse(
         generation_provider=settings.active_generation_provider,
         embedding_provider=settings.embedding_provider,
-        generation_model=settings.gemini_model_generate
-        if settings.active_generation_provider == "gemini"
-        else "mock-model",
+        generation_model=get_generation_model_name(settings),
         embedding_model=embedding_model,
         embedding_dimensions=settings.embedding_dimensions,
         local_embed_device=settings.local_embed_device,

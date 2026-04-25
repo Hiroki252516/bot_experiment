@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     gemini_model_generate: str = "gemini-2.0-flash"
     gemini_model_embed: str = "gemini-embedding-001"
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model_generate: str = "gemma4:e2b"
+    ollama_request_timeout_seconds: float = 120.0
     local_embed_model: str = "pkshatech/GLuCoSE-base-ja"
     local_embed_device: str = "auto"
     local_embed_batch_size: int = 16

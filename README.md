@@ -37,8 +37,9 @@
 cp .env.example .env
 ```
 2. Gemini で回答生成する場合は `.env` の `GEMINI_API_KEY` を設定します。
-3. API キーなしでローカル挙動だけ確認したい場合は `.env` の `GENERATION_PROVIDER=mock` と `EMBEDDING_PROVIDER=mock` を使ってください。
-4. 既定では RAG embedding に `pkshatech/GLuCoSE-base-ja` を使います。初回 ingest または prefetch 時にモデルをダウンロードし、`model_cache` volume に保存します。
+3. Mac host の Ollama で回答生成する場合は、host 側で Ollama を起動し、`.env` に `GENERATION_PROVIDER=ollama` と `LLM_PROVIDER=ollama` を設定します。
+4. API キーなしでローカル挙動だけ確認したい場合は `.env` の `GENERATION_PROVIDER=mock` と `EMBEDDING_PROVIDER=mock` を使ってください。
+5. 既定では RAG embedding に `pkshatech/GLuCoSE-base-ja` を使います。初回 ingest または prefetch 時にモデルをダウンロードし、`model_cache` volume に保存します。
 
 主な環境変数:
 - `DATABASE_URL`
@@ -47,6 +48,9 @@ cp .env.example .env
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL_GENERATE`
 - `GEMINI_MODEL_EMBED`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL_GENERATE`
+- `OLLAMA_REQUEST_TIMEOUT_SECONDS`
 - `LOCAL_EMBED_MODEL`
 - `LOCAL_EMBED_DEVICE`
 - `EMBEDDING_DIMENSIONS`
@@ -137,6 +141,32 @@ docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
 
 Gemini embedding 由来の既存 vector と local embedding は同じ 768 次元でも混在検索しません。実装上は active `provider_name/model_name/dimensions` で retrieval を絞りますが、検索品質を保つため、provider/model を切り替えた後は対象 document を再 ingest してください。
 
+## Ollama Generation
+回答生成と SkillUpdater は `GENERATION_PROVIDER=ollama` で Mac host 側の Ollama に切り替えられます。embedding は `EMBEDDING_PROVIDER=local-sentence-transformers` のまま使えます。
+
+```env
+GENERATION_PROVIDER=ollama
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_MODEL_GENERATE=gemma4:e2b
+OLLAMA_REQUEST_TIMEOUT_SECONDS=120
+EMBEDDING_PROVIDER=local-sentence-transformers
+```
+
+Ollama は Docker container 内ではなく macOS host 側で起動します。backend container からは Docker Desktop の `host.docker.internal:11434` 経由で接続します。
+
+事前確認:
+```bash
+ollama pull gemma4:e2b
+curl http://localhost:11434/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma4:e2b","messages":[{"role":"user","content":"JSONで {\"ok\": true} だけ返してください"}],"stream":false,"format":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}}'
+docker compose exec backend python -c "import httpx; print(httpx.get('http://host.docker.internal:11434/api/tags').status_code)"
+```
+
+`.env` を Ollama 設定にした後、`docker compose up --build` で起動し、PDF ingest 完了後に Chat で質問して3候補が返ることを確認してください。Ollama が未起動、モデル未取得、または JSON schema に合わない応答を返した場合、`/api/chat/generate` は 502 を返します。
+初回モデルロードや長い回答で時間がかかる場合は、`OLLAMA_REQUEST_TIMEOUT_SECONDS` を増やしてください。
+
 失敗または途中停止した ingest を再試行したい場合は、対象 document の状態と job 状態を `pending` に戻します。
 
 ```sql
@@ -184,6 +214,7 @@ docker compose run --rm backend pytest app/tests -q
 
 ## Notes
 - `GeminiGenerationProvider` は Google AI Developer API の `generateContent` を使う実装です。
+- `OllamaGenerationProvider` は Mac host 側 Ollama の `/api/chat` を使い、`stream=false` と JSON schema `format` で構造化 JSON 応答を要求します。
 - `GeminiEmbeddingProvider` は後方互換・比較用に残していますが、既定の embedding provider ではありません。
 - `MockGenerationProvider` と `MockEmbeddingProvider` は API キーなしで縦スライスを確認するための決定的なテスト用実装です。
 - skill 更新は `LLM で差分抽出` と `アプリ側の deterministic merge` を分けています。

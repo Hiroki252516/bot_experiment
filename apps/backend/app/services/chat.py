@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.embeddings.providers import get_embedding_provider
-from app.llm.providers import get_generation_provider
+from app.llm.providers import get_generation_model_name, get_generation_provider
 from app.models.entities import (
     AnswerCandidate,
     AnswerGenerationRun,
@@ -73,7 +73,7 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
     generation = AnswerGenerationRun(
         chat_message_id=message.id,
         provider_name=generation_provider.provider_name,
-        model_name=settings.gemini_model_generate if generation_provider.provider_name == "gemini" else "mock-model",
+        model_name=get_generation_model_name(settings, generation_provider.provider_name),
         temperature=settings.generation_temperature,
         top_p=settings.generation_top_p,
         candidate_count=payload.candidate_count,
