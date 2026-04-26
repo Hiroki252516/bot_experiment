@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     generation_top_p: float = 0.9
     prompt_version: str = "v1"
     request_timeout_seconds: float = 30.0
+    auth_cookie_name: str = "tutorbot_session"
+    auth_cookie_secure: bool = False
+    auth_session_days: int = 7
 
     default_skill_profile: dict = Field(
         default_factory=lambda: {

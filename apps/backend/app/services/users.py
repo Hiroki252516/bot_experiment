@@ -7,9 +7,14 @@ from app.core.config import get_settings
 from app.models.entities import Skill, SkillRevision, User, utcnow
 
 
-def create_user(session: Session, display_name: str | None = None) -> tuple[User, SkillRevision]:
+def create_user(
+    session: Session,
+    display_name: str | None = None,
+    username: str | None = None,
+    password_hash: str | None = None,
+) -> tuple[User, SkillRevision]:
     settings = get_settings()
-    user = User(display_name=display_name, last_seen_at=utcnow())
+    user = User(username=username, password_hash=password_hash, display_name=display_name, last_seen_at=utcnow())
     session.add(user)
     session.flush()
 
@@ -42,4 +47,3 @@ def get_user_with_skill(session: Session, user_id: str) -> tuple[User | None, Sk
     skill = session.scalar(select(Skill).where(Skill.user_id == user_id))
     revision = session.get(SkillRevision, skill.active_revision_id) if skill and skill.active_revision_id else None
     return user, skill, revision
-

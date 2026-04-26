@@ -30,6 +30,8 @@ def _ensure_session(session: Session, user_id: str, session_id: str | None) -> C
     if session_id:
         chat_session = session.get(ChatSession, session_id)
         if chat_session:
+            if chat_session.user_id != user_id:
+                raise PermissionError("Chat session does not belong to the authenticated user")
             return chat_session
     chat_session = ChatSession(user_id=user_id)
     session.add(chat_session)
@@ -60,20 +62,27 @@ def _retrieval_is_confident(retrieval_rows: list[dict], min_score: float) -> boo
     return max(float(row["score"]) for row in retrieval_rows) >= min_score
 
 
-def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest) -> dict:
+def generate_candidates_for_chat(
+    session: Session,
+    payload: ChatGenerateRequest,
+    authenticated_user_id: str | None = None,
+) -> dict:
     settings = get_settings()
     generation_provider = get_generation_provider(settings)
     embedding_provider = get_embedding_provider(settings)
+    user_id = authenticated_user_id or payload.user_id
+    if not user_id:
+        raise ValueError("User not found")
 
-    user, skill, active_revision = get_user_with_skill(session, payload.user_id)
+    user, skill, active_revision = get_user_with_skill(session, user_id)
     if not user or not skill:
         raise ValueError("User not found")
     user.last_seen_at = utcnow()
 
-    chat_session = _ensure_session(session, payload.user_id, payload.session_id)
+    chat_session = _ensure_session(session, user_id, payload.session_id)
     message = ChatMessage(
         session_id=chat_session.id,
-        user_id=payload.user_id,
+        user_id=user_id,
         question_text=payload.question,
         skills_enabled=payload.skills_enabled,
         active_skill_revision_id=active_revision.id if payload.skills_enabled and active_revision else None,
@@ -150,7 +159,7 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
         )
 
     experiment_run = ExperimentRun(
-        user_id=payload.user_id,
+        user_id=user_id,
         chat_message_id=message.id,
         condition_name=payload.experiment_condition or ("skills_on" if payload.skills_enabled else "skills_off"),
         skills_enabled=payload.skills_enabled,
@@ -171,10 +180,16 @@ def generate_candidates_for_chat(session: Session, payload: ChatGenerateRequest)
     }
 
 
-def select_candidate_for_chat(session: Session, payload: ChatSelectRequest) -> dict:
+def select_candidate_for_chat(
+    session: Session,
+    payload: ChatSelectRequest,
+    authenticated_user_id: str | None = None,
+) -> dict:
     message = session.get(ChatMessage, payload.chat_message_id)
     if not message:
         raise ValueError("Chat message not found")
+    if authenticated_user_id and message.user_id != authenticated_user_id:
+        raise PermissionError("Chat message does not belong to the authenticated user")
 
     existing = session.scalar(select(AnswerSelection).where(AnswerSelection.chat_message_id == payload.chat_message_id))
     if existing:
@@ -183,6 +198,9 @@ def select_candidate_for_chat(session: Session, payload: ChatSelectRequest) -> d
     selected_candidate = session.get(AnswerCandidate, payload.selected_candidate_id)
     if not selected_candidate:
         raise ValueError("Selected candidate not found")
+    generation = session.get(AnswerGenerationRun, selected_candidate.generation_run_id)
+    if not generation or generation.chat_message_id != message.id:
+        raise ValueError("Selected candidate does not belong to this chat message")
 
     selection = AnswerSelection(
         chat_message_id=payload.chat_message_id,

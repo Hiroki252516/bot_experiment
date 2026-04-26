@@ -5,9 +5,12 @@ from app.services.documents import process_ingestion_job
 
 
 def test_full_chat_flow(client, session) -> None:
-    create_user_response = client.post("/api/users", json={"display_name": "Tester"})
-    assert create_user_response.status_code == 200
-    user_id = create_user_response.json()["user_id"]
+    register_response = client.post(
+        "/api/auth/register",
+        json={"username": "tester", "password": "password123", "display_name": "Tester"},
+    )
+    assert register_response.status_code == 200
+    user_id = register_response.json()["user_id"]
 
     upload_response = client.post(
         "/api/documents/upload",
@@ -24,7 +27,6 @@ def test_full_chat_flow(client, session) -> None:
     generate_response = client.post(
         "/api/chat/generate",
         json={
-            "user_id": user_id,
             "question": "How do I solve x^2 + 5x + 6 = 0?",
             "candidate_count": 3,
             "skills_enabled": True,

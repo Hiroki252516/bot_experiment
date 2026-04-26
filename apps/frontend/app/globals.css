@@ -46,15 +46,28 @@ select {
 
 .top-nav {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 28px;
 }
 
-.top-nav a {
+.top-nav a,
+.nav-button,
+.nav-user {
   padding: 10px 16px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: rgba(255, 253, 248, 0.82);
+}
+
+.nav-button {
+  color: var(--text);
+  cursor: pointer;
+}
+
+.nav-user {
+  color: var(--muted);
 }
 
 .hero {

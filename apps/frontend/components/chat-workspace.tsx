@@ -1,11 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 
 import { apiFetch } from "../lib/api";
 
-type UserResponse = {
+type AuthUserResponse = {
   user_id: string;
+  username: string;
+  display_name: string | null;
   active_skill_revision_id: string | null;
 };
 
@@ -37,8 +40,8 @@ type DocumentRow = {
 };
 
 export function ChatWorkspace() {
-  const [displayName, setDisplayName] = useState("研究参加者");
-  const [userId, setUserId] = useState("");
+  const [authUser, setAuthUser] = useState<AuthUserResponse | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [sessionId, setSessionId] = useState("");
   const [question, setQuestion] = useState("二次方程式の解き方を教えて");
   const [skillsEnabled, setSkillsEnabled] = useState(true);
@@ -55,7 +58,16 @@ export function ChatWorkspace() {
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    async function refreshDocuments() {
+    async function loadInitialState() {
+      try {
+        const currentUser = await apiFetch<AuthUserResponse>("/api/auth/me");
+        setAuthUser(currentUser);
+      } catch {
+        setAuthUser(null);
+        setAuthLoading(false);
+        return;
+      }
+
       try {
         const response = await apiFetch<DocumentRow[]>("/api/documents");
         const completedDocuments = response.filter((document) => document.ingest_status === "completed");
@@ -70,31 +82,25 @@ export function ChatWorkspace() {
         });
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : "教材一覧の取得に失敗しました。");
+      } finally {
+        setAuthLoading(false);
       }
     }
-    refreshDocuments();
+    loadInitialState();
   }, []);
-
-  async function ensureUser() {
-    if (userId) return userId;
-    const created = await apiFetch<UserResponse>("/api/users", {
-      method: "POST",
-      body: JSON.stringify({ display_name: displayName }),
-    });
-    setUserId(created.user_id);
-    return created.user_id;
-  }
 
   async function handleGenerate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!authUser) {
+      setError("チャットを使うにはログインが必要です。");
+      return;
+    }
     setError("");
     setStatus("回答候補を生成しています...");
     try {
-      const resolvedUserId = await ensureUser();
       const response = await apiFetch<ChatGenerateResponse>("/api/chat/generate", {
         method: "POST",
         body: JSON.stringify({
-          user_id: resolvedUserId,
           question,
           candidate_count: candidateCount,
           skills_enabled: skillsEnabled,
@@ -129,6 +135,10 @@ export function ChatWorkspace() {
   }
 
   async function handleFeedbackSubmit() {
+    if (!authUser) {
+      setError("チャットを使うにはログインが必要です。");
+      return;
+    }
     if (!chatResult) return;
     if (!selectedCandidateId) {
       setError("回答候補を1つ選択してから送信してください。");
@@ -155,6 +165,36 @@ export function ChatWorkspace() {
     }
   }
 
+  if (authLoading) {
+    return (
+      <section className="card stack">
+        <p className="muted">ログイン状態を確認しています...</p>
+      </section>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <section className="card stack" style={{ maxWidth: 720, margin: "0 auto" }}>
+        <div>
+          <p className="muted">ログインが必要です</p>
+          <h1>チャットを使うにはログインしてください</h1>
+          <p className="muted">
+            回答候補の選択をユーザーごとのフィードバックとして保存し、次回以降の回答傾向に反映するため、Chat 画面はログイン済みユーザーのみ利用できます。
+          </p>
+        </div>
+        <div className="inline" style={{ gap: 12 }}>
+          <Link className="button" href="/login">
+            ログイン
+          </Link>
+          <Link className="button secondary" href="/register">
+            新規登録
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className="stack">
       <section className="hero">
@@ -167,15 +207,9 @@ export function ChatWorkspace() {
             </p>
           </div>
           <form className="stack" onSubmit={handleGenerate}>
-            <div className="grid-2">
-              <label className="field">
-                <span>表示名</span>
-                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-              </label>
-              <label className="field">
-                <span>ユーザーID</span>
-                <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="空欄なら自動作成" />
-              </label>
+            <div className="card" style={{ padding: 14 }}>
+              <strong>ログイン中: {authUser.display_name || authUser.username}</strong>
+              <p className="muted">ユーザーID: {authUser.user_id}</p>
             </div>
             <div className="grid-2">
               <label className="field">

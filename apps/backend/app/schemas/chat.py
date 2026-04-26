@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ChatGenerateRequest(BaseModel):
-    user_id: str
+    user_id: str | None = None
     question: str
     document_ids: list[str] | None = None
     course_context: str | None = None

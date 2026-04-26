@@ -21,6 +21,7 @@
 - `skills_enabled` ON/OFF 実験ログ保存
 - `turns.csv`、`candidates.csv`、`feedback.csv`、`skill_revisions.csv`、`retrievals.csv` を含む `logs.zip` export
 - Chat / Logs / Admin の最低限 UI
+- ユーザー名/パスワード登録、ログイン、HttpOnly Cookie セッション
 
 ## Tech Stack
 - Backend: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2.x, Alembic
@@ -60,6 +61,9 @@ cp .env.example .env
 - `UPLOAD_DIR`
 - `EXPORT_DIR`
 - `NEXT_PUBLIC_API_BASE_URL`
+- `AUTH_COOKIE_NAME`
+- `AUTH_COOKIE_SECURE`
+- `AUTH_SESSION_DAYS`
 
 ## Run With Docker Compose
 通常起動:
@@ -84,7 +88,7 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 - pgAdmin: `http://localhost:5050` (`compose.dev.yaml` 使用時)
 
 ## Minimal Workflow
-1. `POST /api/users` で user を作成するか、Chat UI から自動発行する
+1. Chat UI の利用前に `/register` で新規登録するか `/login` でログインする
 2. Admin 画面から教材を upload し、ingest job を作成する
 3. worker が chunking と embedding を実行する
 4. Chat 画面で質問し、3候補を受け取る
@@ -94,6 +98,10 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 
 ## Key API Endpoints
 - `GET /health`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/logout`
 - `POST /api/users`
 - `GET /api/users/{user_id}`
 - `GET /api/users/{user_id}/skills`
@@ -112,6 +120,19 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 - `GET /api/experiments/runs`
 - `GET /api/experiments/runs/{run_id}`
 - `GET /api/experiments/exports/logs.zip`
+
+## Login And Chat Access
+Chat 画面と `/api/chat/generate`、`/api/chat/select` はログイン済みユーザーのみ利用できます。認証は `username + password` と HttpOnly Cookie の opaque session token で行います。
+
+```env
+AUTH_COOKIE_NAME=tutorbot_session
+AUTH_COOKIE_SECURE=false
+AUTH_SESSION_DAYS=7
+```
+
+研究用ローカル環境では `AUTH_COOKIE_SECURE=false` が既定です。HTTPS 前提の環境で使う場合は `AUTH_COOKIE_SECURE=true` にしてください。`Admin` と `Logs` は研究運用を壊さないため、現時点ではログイン必須にしていません。
+
+既存の匿名 `POST /api/users` は互換用に残していますが、Chat UI からは使いません。過去の匿名ユーザーデータは保持されますが、匿名ユーザーを後からログインアカウントへ紐づける移行 UI はありません。
 
 ## Seed Data
 サンプル教材:

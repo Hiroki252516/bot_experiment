@@ -11,6 +11,7 @@ class UserCreateRequest(BaseModel):
 
 class UserResponse(BaseModel):
     user_id: str
+    username: str | None = None
     display_name: str | None
     created_at: datetime
     active_skill_revision_id: str | None
@@ -21,4 +22,3 @@ class SkillSummaryResponse(BaseModel):
     active_revision_id: str | None
     active_profile: dict
     revisions: list[dict]
-
