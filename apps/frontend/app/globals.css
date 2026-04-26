@@ -142,12 +142,14 @@ select {
 }
 
 .candidate {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 18px;
   background: var(--surface);
+  min-height: 100%;
 }
 
 .candidate.selected {
@@ -158,15 +160,32 @@ select {
 .tag-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
 }
 
 .tag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 30px;
   padding: 6px 10px;
   border-radius: 999px;
   background: var(--surface-alt);
   font-size: 13px;
+  line-height: 1.25;
   color: var(--muted);
+}
+
+.candidate > p {
+  flex: 1;
+}
+
+.candidate .button {
+  width: 100%;
+  min-height: 48px;
+  padding-block: 12px;
+  flex: 0 0 auto;
 }
 
 .muted {
