@@ -39,6 +39,67 @@ type DocumentRow = {
   created_at: string;
 };
 
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function cleanCandidateTitle(title: string) {
+  return title.replace(/^#{1,6}\s+/, "").trim();
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("```"))
+    .join("\n")
+    .replace(/(\S)\s+\*\s+/g, "$1\n* ");
+  const blocks = normalizedText
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="markdown-body">
+      {blocks.map((block, blockIndex) => {
+        if (block.startsWith("### ")) {
+          return <h4 key={blockIndex}>{renderInlineMarkdown(block.slice(4))}</h4>;
+        }
+        if (block.startsWith("## ")) {
+          return <h3 key={blockIndex}>{renderInlineMarkdown(block.slice(3))}</h3>;
+        }
+
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        if (lines.every((line) => /^[-*]\s+/.test(line))) {
+          return (
+            <ul key={blockIndex}>
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^[-*]\s+/, ""))}</li>
+              ))}
+            </ul>
+          );
+        }
+        if (lines.every((line) => /^\d+\.\s+/.test(line))) {
+          return (
+            <ol key={blockIndex}>
+              {lines.map((line, lineIndex) => (
+                <li key={lineIndex}>{renderInlineMarkdown(line.replace(/^\d+\.\s+/, ""))}</li>
+              ))}
+            </ol>
+          );
+        }
+        return <p key={blockIndex}>{renderInlineMarkdown(lines.join(" "))}</p>;
+      })}
+    </div>
+  );
+}
+
 export function ChatWorkspace() {
   const [authUser, setAuthUser] = useState<AuthUserResponse | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -49,6 +110,7 @@ export function ChatWorkspace() {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [chatResult, setChatResult] = useState<ChatGenerateResponse | null>(null);
+  const [activeCandidateId, setActiveCandidateId] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [submittedCandidateId, setSubmittedCandidateId] = useState("");
   const [satisfactionScore, setSatisfactionScore] = useState(8);
@@ -111,6 +173,7 @@ export function ChatWorkspace() {
       });
       setChatResult(response);
       setSessionId(response.session_id);
+      setActiveCandidateId(response.candidates[0]?.candidate_id ?? "");
       setSelectedCandidateId("");
       setSubmittedCandidateId("");
       setStatus("回答候補を生成しました。候補を1つ選んでから、選択結果を送信してください。");
@@ -164,6 +227,9 @@ export function ChatWorkspace() {
       setStatus("");
     }
   }
+
+  const activeCandidate =
+    chatResult?.candidates.find((candidate) => candidate.candidate_id === activeCandidateId) ?? chatResult?.candidates[0] ?? null;
 
   if (authLoading) {
     return (
@@ -326,39 +392,64 @@ export function ChatWorkspace() {
             </div>
           </div>
 
-          <div className="grid-3">
-            {chatResult.candidates.map((candidate) => (
-              <article
-                className={`candidate${selectedCandidateId === candidate.candidate_id ? " selected" : ""}`}
-                key={candidate.candidate_id}
-              >
+          <div className="candidate-tabs" role="tablist" aria-label="回答候補">
+            {chatResult.candidates.map((candidate) => {
+              const isActive = activeCandidate?.candidate_id === candidate.candidate_id;
+              const isSelected = selectedCandidateId === candidate.candidate_id;
+              const isSubmitted = submittedCandidateId === candidate.candidate_id;
+              return (
+                <button
+                  aria-selected={isActive}
+                  className={`candidate-tab${isActive ? " active" : ""}${isSelected ? " selected" : ""}`}
+                  key={candidate.candidate_id}
+                  onClick={() => setActiveCandidateId(candidate.candidate_id)}
+                  role="tab"
+                  type="button"
+                >
+                  <span className="candidate-tab-rank">候補 {candidate.rank}</span>
+                  <span className="candidate-tab-title">{cleanCandidateTitle(candidate.title)}</span>
+                  {isSubmitted ? <span className="candidate-tab-status">送信済み</span> : null}
+                  {!isSubmitted && isSelected ? <span className="candidate-tab-status">選択中</span> : null}
+                </button>
+              );
+            })}
+          </div>
+
+          {activeCandidate ? (
+            <article className={`candidate-detail${selectedCandidateId === activeCandidate.candidate_id ? " selected" : ""}`}>
+              <div className="candidate-detail-header">
                 <div>
-                  <p className="muted">候補 {candidate.rank}</p>
-                  <h3>{candidate.title}</h3>
+                  <p className="muted">候補 {activeCandidate.rank}</p>
+                  <h2>{cleanCandidateTitle(activeCandidate.title)}</h2>
                 </div>
                 <div className="tag-row">
-                  {candidate.style_tags.map((tag) => (
+                  {activeCandidate.style_tags.map((tag) => (
                     <span className="tag" key={tag}>
                       {tag}
                     </span>
                   ))}
                 </div>
-                <p>{candidate.answer_text}</p>
+              </div>
+              <MarkdownText text={activeCandidate.answer_text} />
+              <div className="candidate-action-row">
                 <button
-                  className={selectedCandidateId === candidate.candidate_id ? "button secondary" : "button"}
+                  className={selectedCandidateId === activeCandidate.candidate_id ? "button secondary" : "button"}
                   disabled={Boolean(submittedCandidateId)}
-                  onClick={() => handleCandidateChoice(candidate.candidate_id)}
+                  onClick={() => handleCandidateChoice(activeCandidate.candidate_id)}
                   type="button"
                 >
-                  {submittedCandidateId === candidate.candidate_id
+                  {submittedCandidateId === activeCandidate.candidate_id
                     ? "送信済み"
-                    : selectedCandidateId === candidate.candidate_id
-                      ? "選択中"
+                    : selectedCandidateId === activeCandidate.candidate_id
+                      ? "この回答を選択中"
                       : "この回答を選択"}
                 </button>
-              </article>
-            ))}
-          </div>
+                {selectedCandidateId && selectedCandidateId !== activeCandidate.candidate_id ? (
+                  <p className="muted">別の候補を選択中です。この候補に変える場合はボタンを押してください。</p>
+                ) : null}
+              </div>
+            </article>
+          ) : null}
         </section>
       ) : null}
     </div>

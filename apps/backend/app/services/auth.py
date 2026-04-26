@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from sqlalchemy import delete, select
@@ -32,6 +32,12 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def hash_session_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def create_auth_session(session: Session, user_id: str, settings: Settings) -> tuple[AuthSession, str]:
@@ -91,7 +97,7 @@ def get_user_for_session_token(session: Session, token: str) -> tuple[User | Non
     auth_session = session.scalar(select(AuthSession).where(AuthSession.session_token_hash == token_hash))
     if not auth_session:
         return None, None
-    if auth_session.expires_at <= utcnow():
+    if _as_aware_utc(auth_session.expires_at) <= utcnow():
         session.delete(auth_session)
         session.commit()
         return None, None

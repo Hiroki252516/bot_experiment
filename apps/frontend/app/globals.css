@@ -154,22 +154,6 @@ select {
   gap: 16px;
 }
 
-.candidate {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 18px;
-  background: var(--surface);
-  min-height: 100%;
-}
-
-.candidate.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(141, 63, 36, 0.14);
-}
-
 .tag-row {
   display: flex;
   flex-wrap: wrap;
@@ -190,15 +174,125 @@ select {
   color: var(--muted);
 }
 
-.candidate > p {
-  flex: 1;
+.candidate-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.candidate .button {
-  width: 100%;
+.candidate-tab {
+  display: grid;
+  gap: 6px;
+  min-height: 112px;
+  padding: 16px;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.82);
+  cursor: pointer;
+}
+
+.candidate-tab.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(141, 63, 36, 0.14);
+}
+
+.candidate-tab.selected {
+  background: #fbf2e2;
+}
+
+.candidate-tab-rank,
+.candidate-tab-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.candidate-tab-title {
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.candidate-tab-status {
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+}
+
+.candidate-detail {
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 24px;
+  background: var(--surface);
+  box-shadow: 0 18px 40px rgba(69, 44, 25, 0.08);
+}
+
+.candidate-detail.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(141, 63, 36, 0.14), 0 18px 40px rgba(69, 44, 25, 0.08);
+}
+
+.candidate-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.candidate-detail h2 {
+  margin: 4px 0 0;
+}
+
+.candidate-action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.candidate-action-row .button {
+  min-width: 220px;
   min-height: 48px;
-  padding-block: 12px;
-  flex: 0 0 auto;
+}
+
+.markdown-body {
+  display: grid;
+  gap: 14px;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0;
+}
+
+.markdown-body h3 {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 1.45;
+}
+
+.markdown-body h4 {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.4rem;
+}
+
+.markdown-body li + li {
+  margin-top: 6px;
 }
 
 .muted {
@@ -220,7 +314,12 @@ select {
 @media (max-width: 900px) {
   .hero,
   .grid-2,
-  .grid-3 {
+  .grid-3,
+  .candidate-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .candidate-detail-header {
+    display: grid;
   }
 }

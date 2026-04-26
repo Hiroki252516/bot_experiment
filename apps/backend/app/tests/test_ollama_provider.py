@@ -77,19 +77,19 @@ def test_ollama_generate_candidates_parses_chat_response(monkeypatch: pytest.Mon
                 {
                     "title": "候補1",
                     "style_tags": ["stepwise"],
-                    "answer_text": "手順で説明します。",
+                    "answer_text": "## 概要\n\n手順で説明します。\n\n## 要点\n\n- 最初のポイント\n- 次のポイント",
                     "rationale": "段階的説明を重視。",
                 },
                 {
                     "title": "候補2",
                     "style_tags": ["example-first"],
-                    "answer_text": "例から説明します。",
+                    "answer_text": "## 概要\n\n例から説明します。\n\n1. 例を見る\n2. 手順を確認する",
                     "rationale": "具体例を重視。",
                 },
                 {
                     "title": "候補3",
                     "style_tags": ["concise"],
-                    "answer_text": "短く説明します。",
+                    "answer_text": "## 概要\n\n短く説明します。\n\n- 要点だけ確認します",
                     "rationale": "簡潔さを重視。",
                 },
             ]
@@ -108,12 +108,14 @@ def test_ollama_generate_candidates_parses_chat_response(monkeypatch: pytest.Mon
 
     assert len(candidates.candidates) == 3
     assert candidates.candidates[0].title == "候補1"
+    assert "## 概要" in candidates.candidates[0].answer_text
     assert metadata.provider_name == "ollama"
     assert metadata.model_name == "gemma4:e2b"
     assert calls[0]["url"] == "/api/chat"
     assert calls[0]["json"]["stream"] is False
     assert calls[0]["json"]["model"] == "gemma4:e2b"
     assert calls[0]["json"]["format"]["type"] == "object"
+    assert "candidate.answer_text must be Markdown text" in calls[0]["json"]["messages"][0]["content"]
 
 
 def test_ollama_candidate_count_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:

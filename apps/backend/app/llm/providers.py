@@ -10,6 +10,17 @@ from app.core.config import Settings, get_settings
 from app.schemas.llm import GeneratedCandidateSet, ProviderMetadata, SkillDelta
 
 
+CANDIDATE_MARKDOWN_INSTRUCTIONS = (
+    "Keep title as short plain text. Do not put Markdown heading markers such as ## in title.\n"
+    "For every candidate, write answer_text as learner-facing Markdown.\n"
+    "Use short sections with headings such as '## 概要', '## 要点', '## 手順' or '## 注意点'.\n"
+    "Use blank lines between sections, and use bullet lists or numbered lists for details.\n"
+    "Do not write answer_text as one long paragraph.\n"
+    "Organize retrieved material into readable chunks, while keeping each candidate's explanation style distinct.\n"
+    "Do not wrap the whole answer_text in a markdown code fence.\n"
+)
+
+
 class GenerationProvider(ABC):
     provider_name: str
 
@@ -62,10 +73,15 @@ class MockGenerationProvider(GenerationProvider):
         for rank in range(candidate_count):
             title, style_tags = styles[rank]
             answer_text = (
-                f"{title}: For the question '{question}', start by grounding the learner in the key idea.\n\n"
-                f"Retrieved context: {cited_context}\n\n"
-                f"Adaptation note: {notes}\n\n"
-                f"Step {rank + 1}: Explain the concept in a learner-facing way and end with a short self-check."
+                f"## 概要\n\n"
+                f"**{title}** の方針で、質問「{question}」に答えます。\n\n"
+                f"## 教材から拾った要点\n\n"
+                f"- {cited_context}\n"
+                f"- スキル反映: {notes}\n\n"
+                f"## 説明の進め方\n\n"
+                f"1. まず重要な考え方を短く確認します。\n"
+                f"2. 次に学習者が迷いやすい点を整理します。\n"
+                f"3. 最後に自分で確認できるチェックポイントを示します。"
             )
             candidates.append(
                 {
@@ -188,6 +204,7 @@ class GeminiGenerationProvider(GenerationProvider):
         }
         prompt = (
             "You are generating tutoring answer candidates for a research system.\n"
+            f"{CANDIDATE_MARKDOWN_INSTRUCTIONS}"
             f"Question: {question}\n"
             f"Candidate count: {candidate_count}\n"
             f"Skills enabled: {skills_enabled}\n"
@@ -330,6 +347,8 @@ class OllamaGenerationProvider(GenerationProvider):
         prompt = (
             "You are generating tutoring answer candidates for a research system.\n"
             "Return only JSON that matches the provided schema. Do not include markdown or commentary.\n"
+            "The JSON object itself must not be markdown, but each candidate.answer_text must be Markdown text.\n"
+            f"{CANDIDATE_MARKDOWN_INSTRUCTIONS}"
             f"Question: {question}\n"
             f"Candidate count: {candidate_count}\n"
             f"Skills enabled: {skills_enabled}\n"
