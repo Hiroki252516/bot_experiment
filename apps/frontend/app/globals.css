@@ -119,6 +119,11 @@ select {
   cursor: pointer;
 }
 
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .button.secondary {
   background: var(--surface-alt);
   color: var(--text);
@@ -143,6 +148,11 @@ select {
   border-radius: 18px;
   padding: 18px;
   background: var(--surface);
+}
+
+.candidate.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(141, 63, 36, 0.14);
 }
 
 .tag-row {

@@ -47,6 +47,7 @@ export function ChatWorkspace() {
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [chatResult, setChatResult] = useState<ChatGenerateResponse | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [submittedCandidateId, setSubmittedCandidateId] = useState("");
   const [satisfactionScore, setSatisfactionScore] = useState(8);
   const [clarityScore, setClarityScore] = useState(8);
   const [comment, setComment] = useState("例題つきの説明がわかりやすい");
@@ -104,8 +105,9 @@ export function ChatWorkspace() {
       });
       setChatResult(response);
       setSessionId(response.session_id);
-      setSelectedCandidateId(response.candidates[0]?.candidate_id ?? "");
-      setStatus("回答候補を生成しました。");
+      setSelectedCandidateId("");
+      setSubmittedCandidateId("");
+      setStatus("回答候補を生成しました。候補を1つ選んでから、選択結果を送信してください。");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "回答候補の生成に失敗しました。");
       setStatus("");
@@ -120,25 +122,35 @@ export function ChatWorkspace() {
     );
   }
 
-  async function handleSelection(candidateId: string) {
+  function handleCandidateChoice(candidateId: string) {
+    if (submittedCandidateId) return;
+    setSelectedCandidateId(candidateId);
+    setStatus("候補を選択しました。評価を確認してから選択結果を送信してください。");
+  }
+
+  async function handleFeedbackSubmit() {
     if (!chatResult) return;
+    if (!selectedCandidateId) {
+      setError("回答候補を1つ選択してから送信してください。");
+      return;
+    }
     setError("");
-    setStatus("選択結果を保存しています...");
+    setStatus("選択結果をフィードバックとして送信しています...");
     try {
       await apiFetch("/api/chat/select", {
         method: "POST",
         body: JSON.stringify({
           chat_message_id: chatResult.chat_message_id,
-          selected_candidate_id: candidateId,
+          selected_candidate_id: selectedCandidateId,
           satisfaction_score: satisfactionScore,
           clarity_score: clarityScore,
           comment,
         }),
       });
-      setSelectedCandidateId(candidateId);
-      setStatus("選択結果を保存しました。ワーカーがスキル履歴を更新します。");
+      setSubmittedCandidateId(selectedCandidateId);
+      setStatus("選択結果を送信しました。ワーカーがこのフィードバックを使ってスキル履歴を更新します。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "選択結果の保存に失敗しました。");
+      setError(requestError instanceof Error ? requestError.message : "選択結果の送信に失敗しました。");
       setStatus("");
     }
   }
@@ -221,7 +233,7 @@ export function ChatWorkspace() {
         <div className="card stack">
           <div>
             <h2>選択時フィードバック</h2>
-            <p className="muted">候補を選ぶときに、主観評価として一緒に保存します。</p>
+            <p className="muted">回答候補を1つ選んだ後、この評価をフィードバックとして送信します。</p>
           </div>
           <label className="field">
             <span>満足度 (1-10)</span>
@@ -240,6 +252,15 @@ export function ChatWorkspace() {
             <p className="muted">{status || "待機中"}</p>
             {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
           </div>
+          <button
+            className="button"
+            disabled={!chatResult || !selectedCandidateId || Boolean(submittedCandidateId)}
+            onClick={handleFeedbackSubmit}
+            type="button"
+          >
+            {submittedCandidateId ? "選択結果を送信済み" : "選択結果をフィードバックとして送信"}
+          </button>
+          {chatResult && !selectedCandidateId ? <p className="muted">生成された回答候補から、最も良いものを1つ選択してください。</p> : null}
         </div>
       </section>
 
@@ -273,7 +294,10 @@ export function ChatWorkspace() {
 
           <div className="grid-3">
             {chatResult.candidates.map((candidate) => (
-              <article className="candidate" key={candidate.candidate_id}>
+              <article
+                className={`candidate${selectedCandidateId === candidate.candidate_id ? " selected" : ""}`}
+                key={candidate.candidate_id}
+              >
                 <div>
                   <p className="muted">候補 {candidate.rank}</p>
                   <h3>{candidate.title}</h3>
@@ -286,8 +310,17 @@ export function ChatWorkspace() {
                   ))}
                 </div>
                 <p>{candidate.answer_text}</p>
-                <button className={selectedCandidateId === candidate.candidate_id ? "button secondary" : "button"} onClick={() => handleSelection(candidate.candidate_id)} type="button">
-                  {selectedCandidateId === candidate.candidate_id ? "選択中" : "この回答を選ぶ"}
+                <button
+                  className={selectedCandidateId === candidate.candidate_id ? "button secondary" : "button"}
+                  disabled={Boolean(submittedCandidateId)}
+                  onClick={() => handleCandidateChoice(candidate.candidate_id)}
+                  type="button"
+                >
+                  {submittedCandidateId === candidate.candidate_id
+                    ? "送信済み"
+                    : selectedCandidateId === candidate.candidate_id
+                      ? "選択中"
+                      : "この回答を選択"}
                 </button>
               </article>
             ))}
