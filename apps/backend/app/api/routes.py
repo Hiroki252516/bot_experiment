@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_session
 from app.core.config import get_settings
+from app.llm.providers import get_generation_model_name
+from app.models.entities import User
 from app.schemas.admin import (
     AdminRecomputeResponse,
     ExperimentRunCreateRequest,
@@ -16,6 +18,7 @@ from app.schemas.admin import (
     RuntimeProviderResponse,
     SkillHistoryResponse,
 )
+from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthUserResponse
 from app.schemas.chat import (
     ChatGenerateRequest,
     ChatGenerateResponse,
@@ -34,11 +37,60 @@ from app.services.chat import (
     get_user_logs,
     select_candidate_for_chat,
 )
+from app.services.auth import (
+    DuplicateUsernameError,
+    InvalidCredentialsError,
+    get_user_for_session_token,
+    login_user,
+    logout_session,
+    register_user,
+)
 from app.services.documents import create_document, create_ingestion_job, delete_document, list_chunks, list_documents
 from app.services.experiments import create_experiment_run, export_logs_zip, list_experiment_runs
 from app.services.users import create_user, get_user_with_skill
 
 router = APIRouter()
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=token,
+        max_age=settings.auth_session_days * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.delete_cookie(key=settings.auth_cookie_name, path="/", samesite="lax")
+
+
+def _auth_user_response(user: User, active_skill_revision_id: str | None) -> AuthUserResponse:
+    if not user.username:
+        raise HTTPException(status_code=401, detail="Authenticated user has no username")
+    return AuthUserResponse(
+        user_id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        created_at=user.created_at,
+        active_skill_revision_id=active_skill_revision_id,
+    )
+
+
+def require_current_user(request: Request, session: Session = Depends(get_session)) -> User:
+    settings = get_settings()
+    token = request.cookies.get(settings.auth_cookie_name)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user, _revision = get_user_for_session_token(session, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -47,11 +99,54 @@ def health(session: Session = Depends(get_session)) -> HealthResponse:
     return HealthResponse(status="ok", database="ok", timestamp=datetime.now(timezone.utc))
 
 
+@router.post("/api/auth/register", response_model=AuthUserResponse)
+def register_route(payload: AuthRegisterRequest, response: Response, session: Session = Depends(get_session)) -> AuthUserResponse:
+    try:
+        user, revision, token = register_user(
+            session,
+            username=payload.username,
+            password=payload.password,
+            display_name=payload.display_name,
+            settings=get_settings(),
+        )
+    except DuplicateUsernameError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _set_auth_cookie(response, token)
+    return _auth_user_response(user, revision.id)
+
+
+@router.post("/api/auth/login", response_model=AuthUserResponse)
+def login_route(payload: AuthLoginRequest, response: Response, session: Session = Depends(get_session)) -> AuthUserResponse:
+    try:
+        user, revision, token = login_user(session, username=payload.username, password=payload.password, settings=get_settings())
+    except InvalidCredentialsError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    _set_auth_cookie(response, token)
+    return _auth_user_response(user, revision.id if revision else None)
+
+
+@router.get("/api/auth/me", response_model=AuthUserResponse)
+def me_route(current_user: User = Depends(require_current_user), session: Session = Depends(get_session)) -> AuthUserResponse:
+    _user, _skill, revision = get_user_with_skill(session, current_user.id)
+    return _auth_user_response(current_user, revision.id if revision else None)
+
+
+@router.post("/api/auth/logout")
+def logout_route(request: Request, response: Response, session: Session = Depends(get_session)) -> dict:
+    settings = get_settings()
+    token = request.cookies.get(settings.auth_cookie_name)
+    if token:
+        logout_session(session, token)
+    _clear_auth_cookie(response)
+    return {"status": "ok"}
+
+
 @router.post("/api/users", response_model=UserResponse)
 def create_user_route(payload: UserCreateRequest, session: Session = Depends(get_session)) -> UserResponse:
     user, revision = create_user(session, payload.display_name)
     return UserResponse(
         user_id=user.id,
+        username=user.username,
         display_name=user.display_name,
         created_at=user.created_at,
         active_skill_revision_id=revision.id,
@@ -65,6 +160,7 @@ def get_user_route(user_id: str, session: Session = Depends(get_session)) -> Use
         raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(
         user_id=user.id,
+        username=user.username,
         display_name=user.display_name,
         created_at=user.created_at,
         active_skill_revision_id=revision.id if revision else None,
@@ -101,6 +197,7 @@ def upload_document_route(file: UploadFile = File(...), session: Session = Depen
         document_id=document.id,
         filename=document.filename,
         mime_type=document.mime_type,
+        source_type=document.source_type,
         ingest_status=document.ingest_status,
         created_at=document.created_at,
     )
@@ -119,6 +216,7 @@ def list_documents_route(session: Session = Depends(get_session)) -> list[Docume
             document_id=document.id,
             filename=document.filename,
             mime_type=document.mime_type,
+            source_type=document.source_type,
             ingest_status=document.ingest_status,
             created_at=document.created_at,
         )
@@ -152,9 +250,15 @@ def delete_document_route(document_id: str, session: Session = Depends(get_sessi
 
 
 @router.post("/api/chat/generate", response_model=ChatGenerateResponse)
-def generate_chat_route(payload: ChatGenerateRequest, session: Session = Depends(get_session)) -> ChatGenerateResponse:
+def generate_chat_route(
+    payload: ChatGenerateRequest,
+    current_user: User = Depends(require_current_user),
+    session: Session = Depends(get_session),
+) -> ChatGenerateResponse:
     try:
-        result = generate_candidates_for_chat(session, payload)
+        result = generate_candidates_for_chat(session, payload, authenticated_user_id=current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -170,6 +274,8 @@ def generate_chat_route(payload: ChatGenerateRequest, session: Session = Depends
             {
                 "chunk_id": row["chunk_id"],
                 "document_id": row["document_id"],
+                "filename": row["filename"],
+                "chunk_index": row["chunk_index"],
                 "score": row["score"],
                 "text": row["text"],
             }
@@ -190,9 +296,15 @@ def generate_chat_route(payload: ChatGenerateRequest, session: Session = Depends
 
 
 @router.post("/api/chat/select", response_model=ChatSelectResponse)
-def select_chat_route(payload: ChatSelectRequest, session: Session = Depends(get_session)) -> ChatSelectResponse:
+def select_chat_route(
+    payload: ChatSelectRequest,
+    current_user: User = Depends(require_current_user),
+    session: Session = Depends(get_session),
+) -> ChatSelectResponse:
     try:
-        result = select_candidate_for_chat(session, payload)
+        result = select_candidate_for_chat(session, payload, authenticated_user_id=current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return ChatSelectResponse(**result)
@@ -270,9 +382,7 @@ def get_runtime_route() -> RuntimeProviderResponse:
     return RuntimeProviderResponse(
         generation_provider=settings.active_generation_provider,
         embedding_provider=settings.embedding_provider,
-        generation_model=settings.gemini_model_generate
-        if settings.active_generation_provider == "gemini"
-        else "mock-model",
+        generation_model=get_generation_model_name(settings),
         embedding_model=embedding_model,
         embedding_dimensions=settings.embedding_dimensions,
         local_embed_device=settings.local_embed_device,

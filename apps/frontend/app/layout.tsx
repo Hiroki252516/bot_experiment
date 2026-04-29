@@ -1,6 +1,7 @@
 import "./globals.css";
-import Link from "next/link";
 import type { ReactNode } from "react";
+
+import { AuthNav } from "../components/auth-nav";
 
 export const metadata = {
   title: "スキル蓄積型学習支援チャットボット",
@@ -12,11 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="ja">
       <body>
         <div className="page-shell">
-          <nav className="top-nav">
-            <Link href="/">チャット</Link>
-            <Link href="/logs">会話ログ</Link>
-            <Link href="/admin">管理</Link>
-          </nav>
+          <AuthNav />
           {children}
         </div>
       </body>

@@ -9,6 +9,7 @@ class DocumentResponse(BaseModel):
     document_id: str
     filename: str
     mime_type: str
+    source_type: str
     ingest_status: str
     created_at: datetime
 

@@ -8,6 +8,7 @@ type DocumentRow = {
   document_id: string;
   filename: string;
   mime_type: string;
+  source_type: string;
   ingest_status: string;
   created_at: string;
 };
@@ -201,6 +202,7 @@ export function AdminWorkspace() {
                 <th>ファイル名</th>
                 <th>状態</th>
                 <th>種類</th>
+                <th>由来</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -210,6 +212,7 @@ export function AdminWorkspace() {
                   <td>{document.filename}</td>
                   <td>{document.ingest_status}</td>
                   <td>{document.mime_type}</td>
+                  <td>{document.source_type}</td>
                   <td>
                     <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
                       削除

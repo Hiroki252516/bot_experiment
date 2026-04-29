@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     gemini_model_generate: str = "gemini-2.0-flash"
     gemini_model_embed: str = "gemini-embedding-001"
     gemini_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_model_generate: str = "gemma4:e2b"
+    ollama_request_timeout_seconds: float = 120.0
     local_embed_model: str = "pkshatech/GLuCoSE-base-ja"
     local_embed_device: str = "auto"
     local_embed_batch_size: int = 16
@@ -37,6 +40,7 @@ class Settings(BaseSettings):
 
     default_candidate_count: int = 3
     default_retrieval_top_k: int = 5
+    min_retrieval_score: float = 0.25
     default_chunk_size: int = 1200
     default_chunk_overlap: int = 200
     embedding_dimensions: int = 768
@@ -47,6 +51,9 @@ class Settings(BaseSettings):
     generation_top_p: float = 0.9
     prompt_version: str = "v1"
     request_timeout_seconds: float = 30.0
+    auth_cookie_name: str = "tutorbot_session"
+    auth_cookie_secure: bool = False
+    auth_session_days: int = 7
 
     default_skill_profile: dict = Field(
         default_factory=lambda: {
