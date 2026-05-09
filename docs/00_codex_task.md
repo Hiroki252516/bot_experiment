@@ -1,5 +1,7 @@
 # Codex Task
 
+> 2026-05 update: 新規実装の教材参照経路は runtime RAG ではなく **Document Agent Skills** です。PDF/Markdown/text は ingestion 時に `document_skill_revisions` / `document_skill_entries` として構造化し、回答生成時はその entries を deterministic に context 化します。`rag_document_chunks`、`embeddings`、`retrieval_logs`、pgvector は legacy / historical compatibility として残します。
+
 以下の仕様に従って、**研究用プロトタイプ一式**を monorepo で実装してください。
 
 ## 目的
@@ -13,7 +15,7 @@
 - ユーザーが最良と思う回答候補を選択できること
 - 選択された回答・選択されなかった回答の両方を保存すること
 - ユーザーごとの Skill を保存し、次回生成時に反映すること
-- RAG により学習資料を検索して回答に使うこと
+- Document Skill entries により学習資料を参照して回答に使うこと
 - 実験のために **skills 有効 / 無効** を切り替えられること
 - 主観評価（満足度・わかりやすさ等）を保存できること
 - 実験ログをエクスポートできること
@@ -32,8 +34,8 @@
 3. backend API
 4. frontend UI
 5. DB schema と migration
-6. RAG ingestion
-7. RAG retrieval
+6. Document Skill extraction
+7. Document Skill context selection
 8. candidate generation
 9. answer selection API
 10. feedback persistence
@@ -66,12 +68,12 @@
 - 入出力は Pydantic で明示すること
 - LLM の機械可読な結果は JSON schema で厳格化すること
 
-## RAG 要件
+## Document Skill 要件
 - 学習資料（pdf, md, txt）を投入できる
-- chunking して embeddings を保存する
-- top-k retrieval ができる
-- 回答時に取得した文脈を candidate generation に渡す
-- どの chunk を参照したかログに残す
+- ingestion 時に Document Skill revision / entries を保存する
+- 回答時に selected document の Document Skill entries を candidate generation に渡す
+- どの Document Skill entry を参照したか usage log に残す
+- legacy RAG の chunk / embedding / retrieval は新規 runtime path では使わない
 
 ## Skill 要件
 Skill はユーザー別に持つ。内容は少なくとも以下を扱う:

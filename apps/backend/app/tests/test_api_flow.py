@@ -1,6 +1,6 @@
 from io import BytesIO
 
-from app.models.entities import IngestionJob
+from app.models.entities import Embedding, IngestionJob
 from app.services.documents import process_ingestion_job
 
 
@@ -36,7 +36,9 @@ def test_full_chat_flow(client, session) -> None:
     payload = generate_response.json()
     assert len(payload["candidates"]) == 3
     assert payload["skills_enabled"] is True
-    assert len(payload["retrievals"]) == 1
+    assert payload["retrievals"] == []
+    assert len(payload["document_skill_contexts"]) == 1
+    assert session.query(Embedding).count() == 0
 
     selected_candidate_id = payload["candidates"][1]["candidate_id"]
     select_response = client.post(

@@ -4,7 +4,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.embeddings.providers import get_embedding_provider
 from app.llm.providers import get_generation_model_name, get_generation_provider
 from app.models.entities import (
     AnswerCandidate,
@@ -13,16 +12,17 @@ from app.models.entities import (
     ChatMessage,
     ChatSession,
     ExperimentRun,
-    RagDocument,
-    RagDocumentChunk,
-    RetrievalLog,
     SkillRevision,
     SkillUpdateJob,
     SubjectiveFeedback,
     utcnow,
 )
-from app.rag.retrieval import retrieve_chunks
 from app.schemas.chat import ChatGenerateRequest, ChatSelectRequest
+from app.services.document_skills import (
+    build_document_skill_context,
+    get_usage_contexts_for_message,
+    persist_document_skill_usage_logs,
+)
 from app.services.users import get_user_with_skill
 
 
@@ -39,29 +39,6 @@ def _ensure_session(session: Session, user_id: str, session_id: str | None) -> C
     return chat_session
 
 
-def _build_no_retrieval_candidates(generation_id: str, candidate_count: int) -> list[AnswerCandidate]:
-    candidates: list[AnswerCandidate] = []
-    for index in range(1, candidate_count + 1):
-        candidates.append(
-            AnswerCandidate(
-                generation_run_id=generation_id,
-                rank=index,
-                display_order=index,
-                title="該当箇所なし",
-                style_tags=["no-retrieval"],
-                answer_text="資料中に該当箇所が見つかりません。",
-                rationale_internal="Retrieval score was below the configured threshold, so generation was skipped.",
-            )
-        )
-    return candidates
-
-
-def _retrieval_is_confident(retrieval_rows: list[dict], min_score: float) -> bool:
-    if not retrieval_rows:
-        return False
-    return max(float(row["score"]) for row in retrieval_rows) >= min_score
-
-
 def generate_candidates_for_chat(
     session: Session,
     payload: ChatGenerateRequest,
@@ -69,7 +46,6 @@ def generate_candidates_for_chat(
 ) -> dict:
     settings = get_settings()
     generation_provider = get_generation_provider(settings)
-    embedding_provider = get_embedding_provider(settings)
     user_id = authenticated_user_id or payload.user_id
     if not user_id:
         raise ValueError("User not found")
@@ -92,18 +68,10 @@ def generate_candidates_for_chat(
     session.flush()
 
     skill_profile = active_revision.profile_json if payload.skills_enabled and active_revision else settings.default_skill_profile
-    query_embedding_result = embedding_provider.embed_texts([payload.question])
-    query_embedding = query_embedding_result.vectors[0]
-    retrieval_rows = retrieve_chunks(
+    document_skill_context, document_skill_usage_items = build_document_skill_context(
         session,
-        query_embedding,
-        settings.default_retrieval_top_k,
-        provider_name=query_embedding_result.provider_name,
-        model_name=query_embedding_result.model_name,
-        dimensions=query_embedding_result.dimensions,
         document_ids=payload.document_ids,
-        min_score=settings.min_retrieval_score,
-        lexical_fallback_question=payload.question,
+        enabled=payload.document_skills_enabled,
     )
 
     generation = AnswerGenerationRun(
@@ -114,49 +82,36 @@ def generate_candidates_for_chat(
         top_p=settings.generation_top_p,
         candidate_count=payload.candidate_count,
         prompt_version=settings.prompt_version,
-        retrieval_top_k=settings.default_retrieval_top_k,
+        retrieval_top_k=0,
         status="completed",
     )
     session.add(generation)
     session.flush()
 
     candidates: list[AnswerCandidate] = []
-    if _retrieval_is_confident(retrieval_rows, settings.min_retrieval_score):
-        candidate_set, _metadata = generation_provider.generate_candidates(
-            question=payload.question,
-            retrievals=retrieval_rows,
-            skill_profile=skill_profile,
-            candidate_count=payload.candidate_count,
-            skills_enabled=payload.skills_enabled,
-        )
-        for index, candidate in enumerate(candidate_set.candidates, start=1):
-            candidates.append(
-                AnswerCandidate(
-                    generation_run_id=generation.id,
-                    rank=index,
-                    display_order=index,
-                    title=candidate.title,
-                    style_tags=candidate.style_tags,
-                    answer_text=candidate.answer_text,
-                    rationale_internal=candidate.rationale,
-                )
+    candidate_set, _metadata = generation_provider.generate_candidates(
+        question=payload.question,
+        preference_skill_profile=skill_profile,
+        document_skill_context=document_skill_context,
+        candidate_count=payload.candidate_count,
+        personalization_skills_enabled=payload.skills_enabled,
+        document_skills_enabled=payload.document_skills_enabled,
+    )
+    for index, candidate in enumerate(candidate_set.candidates, start=1):
+        candidates.append(
+            AnswerCandidate(
+                generation_run_id=generation.id,
+                rank=index,
+                display_order=index,
+                title=candidate.title,
+                style_tags=candidate.style_tags,
+                answer_text=candidate.answer_text,
+                rationale_internal=candidate.rationale,
             )
-    else:
-        generation.status = "no_retrieval_match"
-        candidates = _build_no_retrieval_candidates(generation.id, payload.candidate_count)
+        )
 
     session.add_all(candidates)
-
-    for index, retrieval in enumerate(retrieval_rows, start=1):
-        session.add(
-            RetrievalLog(
-                chat_message_id=message.id,
-                chunk_id=retrieval["chunk_id"],
-                score=float(retrieval["score"]),
-                rank=index,
-                embedding_model=retrieval["embedding_model"],
-            )
-        )
+    persist_document_skill_usage_logs(session, chat_message_id=message.id, usage_items=document_skill_usage_items)
 
     experiment_run = ExperimentRun(
         user_id=user_id,
@@ -175,7 +130,8 @@ def generate_candidates_for_chat(
         "generation_run_id": generation.id,
         "skills_enabled": payload.skills_enabled,
         "active_skill_revision_id": message.active_skill_revision_id,
-        "retrievals": retrieval_rows,
+        "retrievals": [],
+        "document_skill_contexts": document_skill_context["documents"],
         "candidates": candidates,
     }
 
@@ -264,25 +220,7 @@ def get_session_detail(session: Session, session_id: str) -> dict:
             else []
         )
         selection = session.scalar(select(AnswerSelection).where(AnswerSelection.chat_message_id == message.id))
-        retrievals = list(
-            session.execute(
-                select(RetrievalLog).where(RetrievalLog.chat_message_id == message.id).order_by(RetrievalLog.rank.asc())
-            ).scalars()
-        )
-        retrieval_payload = []
-        for retrieval in retrievals:
-            chunk = session.get(RagDocumentChunk, retrieval.chunk_id)
-            document = session.get(RagDocument, chunk.document_id) if chunk else None
-            retrieval_payload.append(
-                {
-                    "chunk_id": retrieval.chunk_id,
-                    "document_id": chunk.document_id if chunk else "",
-                    "filename": document.filename if document else "",
-                    "chunk_index": chunk.chunk_index if chunk else 0,
-                    "score": retrieval.score,
-                    "text": chunk.content if chunk else "",
-                }
-            )
+        document_skill_contexts = get_usage_contexts_for_message(session, message.id)
         items.append(
             {
                 "chat_message_id": message.id,
@@ -309,7 +247,8 @@ def get_session_detail(session: Session, session_id: str) -> dict:
                 }
                 if selection
                 else None,
-                "retrievals": retrieval_payload,
+                "retrievals": [],
+                "document_skill_contexts": document_skill_contexts,
                 "created_at": message.created_at,
             }
         )

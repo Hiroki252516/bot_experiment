@@ -28,6 +28,20 @@ type ChatGenerateResponse = {
   skills_enabled: boolean;
   active_skill_revision_id: string | null;
   retrievals: Array<{ chunk_id: string; document_id: string; filename: string; chunk_index: number; score: number; text: string }>;
+  document_skill_contexts: Array<{
+    document_id: string;
+    filename: string;
+    document_skill_revision_id: string;
+    entries: Array<{
+      entry_id: string;
+      entry_type: string;
+      title: string;
+      content: string;
+      source_page: number | null;
+      source_span: string | null;
+      included_order: number;
+    }>;
+  }>;
   candidates: Candidate[];
 };
 
@@ -106,6 +120,7 @@ export function ChatWorkspace() {
   const [sessionId, setSessionId] = useState("");
   const [question, setQuestion] = useState("二次方程式の解き方を教えて");
   const [skillsEnabled, setSkillsEnabled] = useState(true);
+  const [documentSkillsEnabled, setDocumentSkillsEnabled] = useState(true);
   const [candidateCount, setCandidateCount] = useState(3);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
@@ -166,6 +181,7 @@ export function ChatWorkspace() {
           question,
           candidate_count: candidateCount,
           skills_enabled: skillsEnabled,
+          document_skills_enabled: documentSkillsEnabled,
           document_ids: selectedDocumentIds.length ? selectedDocumentIds : null,
           session_id: sessionId || null,
           experiment_condition: skillsEnabled ? "skills_on" : "skills_off",
@@ -296,14 +312,21 @@ export function ChatWorkspace() {
               <textarea value={question} onChange={(event) => setQuestion(event.target.value)} />
             </label>
             <label className="field">
-              <span>実験条件</span>
+              <span>Preference Skill 条件</span>
               <select value={skillsEnabled ? "on" : "off"} onChange={(event) => setSkillsEnabled(event.target.value === "on")}>
-                <option value="on">スキル有効</option>
-                <option value="off">スキル無効</option>
+                <option value="on">個人化スキル有効</option>
+                <option value="off">個人化スキル無効</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Document Skill 参照</span>
+              <select value={documentSkillsEnabled ? "on" : "off"} onChange={(event) => setDocumentSkillsEnabled(event.target.value === "on")}>
+                <option value="on">Document Skill を参照する</option>
+                <option value="off">Document Skill を参照しない</option>
               </select>
             </label>
             <div className="field">
-              <span>検索対象教材</span>
+              <span>参照対象教材</span>
               <div className="stack" style={{ gap: 8 }}>
                 {documents.map((document) => (
                   <label className="inline" key={document.document_id}>
@@ -320,7 +343,7 @@ export function ChatWorkspace() {
                 ))}
                 {documents.length === 0 ? <p className="muted">completed の教材がありません。管理画面から教材を投入してください。</p> : null}
                 {selectedDocumentIds.length === 0 ? (
-                  <p className="muted">未選択の場合、seed 教材を除いた completed 教材全体から検索します。</p>
+                  <p className="muted">未選択の場合、seed 教材を除いた completed 教材の Document Skill entries を参照します。</p>
                 ) : null}
               </div>
             </div>
@@ -374,21 +397,32 @@ export function ChatWorkspace() {
                 <p className="muted">質問ターン: {chatResult.chat_message_id}</p>
               </div>
               <div>
-                <h2>検索結果</h2>
-                <p className="muted">{chatResult.retrievals.length} 件のチャンクを参照しました。</p>
+                <h2>参照された Document Skill entries</h2>
+                <p className="muted">
+                  {chatResult.document_skill_contexts.reduce((total, context) => total + context.entries.length, 0)} 件の entries を参照しました。
+                </p>
               </div>
             </div>
             <div className="stack">
-              {chatResult.retrievals.map((retrieval) => (
-                <div className="card" key={retrieval.chunk_id} style={{ padding: 14 }}>
-                  <strong>{retrieval.filename}</strong>
-                  <p className="muted">
-                    chunk {retrieval.chunk_index} / {retrieval.chunk_id} / スコア: {retrieval.score.toFixed(4)}
-                  </p>
-                  <p>{retrieval.text}</p>
+              {chatResult.document_skill_contexts.map((context) => (
+                <div className="card stack" key={context.document_skill_revision_id} style={{ padding: 14 }}>
+                  <strong>{context.filename}</strong>
+                  <p className="muted">Document Skill revision: {context.document_skill_revision_id}</p>
+                  {context.entries.slice(0, 8).map((entry) => (
+                    <div className="document-skill-entry-preview" key={entry.entry_id}>
+                      <span className="tag">{entry.entry_type}</span>
+                      <strong>{entry.title}</strong>
+                      <p>{entry.content}</p>
+                      <p className="muted">
+                        {entry.source_page ? `p.${entry.source_page}` : "ページ情報なし"} / order {entry.included_order}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               ))}
-              {chatResult.retrievals.length === 0 ? <p className="muted">まだ検索対象のチャンクがありません。管理画面から教材を投入してください。</p> : null}
+              {chatResult.document_skill_contexts.length === 0 ? (
+                <p className="muted">参照可能な Document Skill entries がありません。管理画面で教材を投入し、Document Skill extraction を完了してください。</p>
+              ) : null}
             </div>
           </div>
 

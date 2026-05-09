@@ -1,5 +1,7 @@
 # 04 Implementation Plan
 
+> 2026-05 update: Phase 4 は runtime RAG ではなく **Document Skill extraction** を実装対象とする。Phase 5 の候補生成は `Document Agent Skills JSON` と `Preference Skill JSON` を prompt に渡す。
+
 ## 1. Phase 1 — Repo skeleton
 受け入れ条件:
 - monorepo ができている
@@ -32,18 +34,17 @@
 - 画面遷移できる
 - mock API でも表示できる
 
-## 4. Phase 4 — Document ingestion / RAG
+## 4. Phase 4 — Document ingestion / Document Skill
 実装:
 - upload endpoint
 - parser
-- chunker
-- embeddings
-- pgvector 保存
-- retrieval service
+- Document Skill extraction
+- deterministic merge
+- document_skill_revisions / document_skill_entries 保存
 
 受け入れ条件:
 - サンプル文書を ingest できる
-- top-k を返せる
+- Document Skill entries を確認できる
 
 ## 5. Phase 5 — Candidate generation
 実装:
@@ -54,7 +55,7 @@
 
 受け入れ条件:
 - 3 候補が返る
-- retrieval と skill が prompt に反映される
+- Document Skill と Preference Skill が prompt に反映される
 - 生成ログが保存される
 
 ## 6. Phase 6 — Selection / Feedback

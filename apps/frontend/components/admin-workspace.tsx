@@ -11,6 +11,20 @@ type DocumentRow = {
   source_type: string;
   ingest_status: string;
   created_at: string;
+  document_skill_status: string | null;
+  active_document_skill_revision_id: string | null;
+  document_skill_revision_number: number | null;
+  document_skill_entries_count: number;
+  document_skill_updated_at: string | null;
+};
+
+type DocumentSkillEntry = {
+  entry_id: string;
+  entry_type: string;
+  title: string;
+  content: string;
+  source_page: number | null;
+  source_span: string | null;
 };
 
 type SkillHistory = {
@@ -52,6 +66,8 @@ export function AdminWorkspace() {
   const [skillHistory, setSkillHistory] = useState<SkillHistory | null>(null);
   const [runs, setRuns] = useState<ExperimentRun[]>([]);
   const [runtime, setRuntime] = useState<RuntimeProvider | null>(null);
+  const [documentSkillEntries, setDocumentSkillEntries] = useState<DocumentSkillEntry[]>([]);
+  const [selectedDocumentName, setSelectedDocumentName] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -95,7 +111,7 @@ export function AdminWorkspace() {
       await apiFetch(`/api/documents/${document.document_id}/ingest`, {
         method: "POST",
       });
-      setStatus("アップロードが完了しました。取り込みジョブを登録しました。");
+      setStatus("アップロードが完了しました。Document Skill extraction job を登録しました。");
       await refreshDocuments();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "アップロードに失敗しました。");
@@ -104,7 +120,7 @@ export function AdminWorkspace() {
 
   async function handleDeleteDocument(document: DocumentRow) {
     const confirmed = window.confirm(
-      `教材「${document.filename}」を削除します。取り込みジョブ、チャンク、埋め込み、検索ログ、保存ファイルも削除されます。よろしいですか？`,
+      `教材「${document.filename}」を削除します。Document Skill、extraction jobs、legacy chunks/embeddings/logs、保存ファイルも削除されます。よろしいですか？`,
     );
     if (!confirmed) return;
     setError("");
@@ -115,6 +131,17 @@ export function AdminWorkspace() {
       await refreshDocuments();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "教材の削除に失敗しました。");
+    }
+  }
+
+  async function handleLoadDocumentSkillEntries(document: DocumentRow) {
+    setError("");
+    try {
+      const response = await apiFetch<DocumentSkillEntry[]>(`/api/documents/${document.document_id}/skill/entries`);
+      setDocumentSkillEntries(response);
+      setSelectedDocumentName(document.filename);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Document Skill entries の取得に失敗しました。");
     }
   }
 
@@ -171,24 +198,22 @@ export function AdminWorkspace() {
               <p>
                 生成: {runtime.generation_provider} / {runtime.generation_model}
               </p>
-              <p>
-                埋め込み: {runtime.embedding_provider} / {runtime.embedding_model} / {runtime.embedding_dimensions} 次元 / device={runtime.local_embed_device}
-              </p>
+              <p>Document Skill: runtime RAG / embedding は legacy。回答生成は Document Skill entries を参照します。</p>
             </div>
           ) : null}
         </div>
 
         <form className="card stack" onSubmit={handleUpload}>
           <div>
-            <h2>教材の取り込み</h2>
-            <p className="muted">`pdf`、`md`、`txt` をアップロードし、ワーカー処理用の取り込みジョブを登録します。</p>
+            <h2>Document Skill extraction</h2>
+            <p className="muted">`pdf`、`md`、`txt` をアップロードし、教材を Document Skill entries として構造化します。</p>
           </div>
           <label className="field">
             <span>ファイル</span>
             <input accept=".pdf,.md,.txt,text/plain,application/pdf,text/markdown" onChange={handleFileChange} type="file" />
           </label>
           <button className="button" type="submit">
-            アップロードして取り込みを登録
+            アップロードして Document Skill extraction を登録
           </button>
         </form>
       </section>
@@ -201,6 +226,8 @@ export function AdminWorkspace() {
               <tr>
                 <th>ファイル名</th>
                 <th>状態</th>
+                <th>Document Skill</th>
+                <th>entries</th>
                 <th>種類</th>
                 <th>由来</th>
                 <th>操作</th>
@@ -211,9 +238,17 @@ export function AdminWorkspace() {
                 <tr key={document.document_id}>
                   <td>{document.filename}</td>
                   <td>{document.ingest_status}</td>
+                  <td>
+                    {document.document_skill_status ?? "未作成"}
+                    {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
+                  </td>
+                  <td>{document.document_skill_entries_count}</td>
                   <td>{document.mime_type}</td>
                   <td>{document.source_type}</td>
                   <td>
+                    <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
+                      entries
+                    </button>{" "}
                     <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
                       削除
                     </button>
@@ -245,6 +280,29 @@ export function AdminWorkspace() {
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section className="card stack">
+        <div>
+          <h2>Document Skill viewer</h2>
+          <p className="muted">{selectedDocumentName || "教材一覧の entries ボタンから表示してください。"}</p>
+        </div>
+        {documentSkillEntries.length ? (
+          <div className="stack">
+            {documentSkillEntries.map((entry) => (
+              <article className="card" key={entry.entry_id} style={{ padding: 14 }}>
+                <span className="tag">{entry.entry_type}</span>
+                <h3>{entry.title}</h3>
+                <p>{entry.content}</p>
+                <p className="muted">
+                  {entry.source_page ? `p.${entry.source_page}` : "ページ情報なし"} {entry.source_span ? `/ ${entry.source_span}` : ""}
+                </p>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted">表示中の Document Skill entries はありません。</p>
+        )}
       </section>
 
       <section className="card stack">

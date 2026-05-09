@@ -1,5 +1,7 @@
 # 02 Architecture
 
+> 2026-05 update: 新規 runtime answer-generation path は embedding / vector retrieval を使わず、ingestion 時に抽出した **Document Skill entries** を参照する。pgvector と RAG テーブルは legacy として保持する。
+
 ## 1. 採用アーキテクチャ
 ### Monorepo
 - `apps/frontend`
@@ -24,6 +26,7 @@
 理由:
 - 通常のリレーショナルデータとベクトル検索を同居できる
 - ログ、実験データ、candidate、skill revision を一元管理できる
+- 新規 Document Skill tables と legacy vector tables を同一 DB で管理できる
 
 ### Frontend: Next.js
 理由:
@@ -32,7 +35,7 @@
 
 ### Worker
 理由:
-- skill 更新、embedding 作成、ingest などを API リクエストから分離できる
+- Preference Skill 更新、Document Skill extraction などを API リクエストから分離できる
 
 ## 3. Docker Compose 構成
 必須サービス:
@@ -61,7 +64,7 @@
 ### backend
 - REST API
 - session / conversation 管理
-- RAG retrieval
+- Document Skill context 構築
 - skill 読み出し
 - LLM candidate generation
 - 選択結果保存
@@ -69,15 +72,14 @@
 
 ### worker
 - document ingestion
-- chunking
-- embedding 生成
-- vector 保存
+- Document Skill extraction
+- Document Skill revision / entries 保存
 - skill updater
 - 非同期ジョブ管理
 
 ### db
 - 学習資料
-- chunk
+- Document Skill revision / entries
 - embeddings
 - users
 - conversations
