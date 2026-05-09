@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_session
 from app.core.config import get_settings
 from app.llm.providers import get_generation_model_name
-from app.models.entities import User
+from app.models.entities import StudyAssessment, StudyRun, User
 from app.schemas.admin import (
     AdminRecomputeResponse,
     ExperimentRunCreateRequest,
@@ -32,6 +32,24 @@ from app.schemas.document_skill import (
     DocumentSkillEntryResponse,
     DocumentSkillResponse,
     DocumentSkillRevisionResponse,
+)
+from app.schemas.study import (
+    AssessmentStartRequest,
+    AssessmentStartResponse,
+    AssessmentSubmitRequest,
+    AssessmentSubmitResponse,
+    ChatAskRequest,
+    ChatAskResponse,
+    MasteryEstimateRequest,
+    MasteryEstimateResponse,
+    MaterialNextRequest,
+    MaterialReadConfirmRequest,
+    MaterialReadConfirmResponse,
+    MaterialResponse,
+    RunFinishRequest,
+    RunFinishResponse,
+    RunStartRequest,
+    RunStartResponse,
 )
 from app.schemas.user import SkillSummaryResponse, UserCreateRequest, UserResponse
 from app.services.chat import (
@@ -61,6 +79,16 @@ from app.services.documents import (
     list_documents,
 )
 from app.services.experiments import create_experiment_run, export_logs_zip, list_experiment_runs
+from app.services.study import (
+    chat_ask,
+    confirm_material_read,
+    estimate_mastery,
+    finish_run,
+    get_or_create_material,
+    start_assessment,
+    start_run,
+    submit_assessment,
+)
 from app.services.users import create_user, get_user_with_skill
 
 router = APIRouter()
@@ -111,6 +139,119 @@ def require_current_user(request: Request, session: Session = Depends(get_sessio
 def health(session: Session = Depends(get_session)) -> HealthResponse:
     session.execute(text("SELECT 1"))
     return HealthResponse(status="ok", database="ok", timestamp=datetime.now(timezone.utc))
+
+
+# --- Study flow APIs (Pre → Cycle1..3 → Post) ---
+
+
+@router.post("/api/runs/start", response_model=RunStartResponse)
+def start_run_route(payload: RunStartRequest, session: Session = Depends(get_session)) -> RunStartResponse:
+    run = start_run(session, user_id=payload.user_id, group=payload.group, cycle_count=payload.cycle_count)
+    return RunStartResponse(
+        run_id=run.id,
+        user_id=run.user_id,
+        group=run.group,
+        skills_enabled=run.skills_enabled,
+        cycle_count=run.cycle_count,
+        created_at=run.created_at,
+    )
+
+
+@router.post("/api/runs/finish", response_model=RunFinishResponse)
+def finish_run_route(payload: RunFinishRequest, session: Session = Depends(get_session)) -> RunFinishResponse:
+    run = finish_run(session, payload.run_id)
+    if not run.finished_at:
+        raise HTTPException(status_code=500, detail="Run finish failed")
+    return RunFinishResponse(run_id=run.id, finished_at=run.finished_at)
+
+
+@router.post("/api/materials/next", response_model=MaterialResponse)
+def material_next_route(payload: MaterialNextRequest, session: Session = Depends(get_session)) -> MaterialResponse:
+    study_run = session.get(StudyRun, payload.run_id)
+    if not study_run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    material = get_or_create_material(session, study_run, payload.cycle_index)
+    return MaterialResponse(
+        material_id=material.id,
+        run_id=material.run_id,
+        cycle_index=material.cycle_index,
+        group=study_run.group,
+        source_type=material.source_type,  # type: ignore[arg-type]
+        content_text=material.content_text,
+        difficulty=material.difficulty,
+        created_at=material.created_at,
+    )
+
+
+@router.post("/api/materials/read_confirm", response_model=MaterialReadConfirmResponse)
+def material_read_confirm_route(
+    payload: MaterialReadConfirmRequest, session: Session = Depends(get_session)
+) -> MaterialReadConfirmResponse:
+    read = confirm_material_read(
+        session,
+        run_id=payload.run_id,
+        material_id=payload.material_id,
+        presented_at=payload.presented_at,
+        read_confirmed_at=payload.read_confirmed_at,
+    )
+    return MaterialReadConfirmResponse(material_read_id=read.id, duration_seconds=read.duration_seconds)
+
+
+@router.post("/api/assessments/start", response_model=AssessmentStartResponse)
+def assessment_start_route(payload: AssessmentStartRequest, session: Session = Depends(get_session)) -> AssessmentStartResponse:
+    attempt = start_assessment(session, payload.run_id, payload.assessment_type, payload.cycle_index)
+    assessment = session.get(StudyAssessment, attempt.assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=500, detail="Assessment missing")
+    return AssessmentStartResponse(
+        assessment_attempt_id=attempt.id,
+        assessment_id=attempt.assessment_id,
+        assessment_type=attempt.assessment_type,  # type: ignore[arg-type]
+        cycle_index=attempt.cycle_index,
+        started_at=attempt.started_at,
+        content_json=assessment.content_json,
+    )
+
+
+@router.post("/api/assessments/submit", response_model=AssessmentSubmitResponse)
+def assessment_submit_route(
+    payload: AssessmentSubmitRequest, session: Session = Depends(get_session)
+) -> AssessmentSubmitResponse:
+    attempt = submit_assessment(
+        session,
+        attempt_id=payload.assessment_attempt_id,
+        submitted_at=payload.submitted_at,
+        answers=[answer.model_dump() for answer in payload.answers],
+    )
+    per_question = attempt.result_json.get("per_question_correct", [])
+    return AssessmentSubmitResponse(
+        assessment_attempt_id=attempt.id,
+        submitted_at=attempt.submitted_at or payload.submitted_at,
+        duration_seconds=attempt.duration_seconds or 0,
+        score=attempt.score or 0,
+        max_score=attempt.max_score or 0,
+        per_question_correct=per_question,
+    )
+
+
+@router.post("/api/mastery/estimate", response_model=MasteryEstimateResponse)
+def mastery_estimate_route(
+    payload: MasteryEstimateRequest, session: Session = Depends(get_session)
+) -> MasteryEstimateResponse:
+    estimate = estimate_mastery(session, payload.run_id, payload.cycle_index)
+    return MasteryEstimateResponse(
+        mastery_estimate_id=estimate.id,
+        run_id=estimate.run_id,
+        cycle_index=estimate.cycle_index,
+        estimate_json=estimate.estimate_json,
+        created_at=estimate.created_at,
+    )
+
+
+@router.post("/api/chat/ask", response_model=ChatAskResponse)
+def chat_ask_route(payload: ChatAskRequest, session: Session = Depends(get_session)) -> ChatAskResponse:
+    turn = chat_ask(session, payload.run_id, payload.material_id, payload.question_text)
+    return ChatAskResponse(chat_turn_id=turn.id, answer_text=turn.answer_text, created_at=turn.created_at)
 
 
 @router.post("/api/auth/register", response_model=AuthUserResponse)

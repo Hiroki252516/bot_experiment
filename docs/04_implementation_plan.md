@@ -1,7 +1,5 @@
 # 04 Implementation Plan
 
-> 2026-05 update: Phase 4 は runtime RAG ではなく **Document Skill extraction** を実装対象とする。Phase 5 の候補生成は `Document Agent Skills JSON` と `Preference Skill JSON` を prompt に渡す。
-
 ## 1. Phase 1 — Repo skeleton
 受け入れ条件:
 - monorepo ができている
@@ -24,9 +22,10 @@
 
 ## 3. Phase 3 — Frontend foundation
 実装:
-- chat page
-- log page
-- admin page
+- run start page（A/B/C の条件表示）
+- study flow pages（Pre → Material → Mini → Post）
+- log page（run 一覧 / 詳細）
+- admin page（skills history / recompute）
 - API client
 - basic styling only
 
@@ -34,88 +33,83 @@
 - 画面遷移できる
 - mock API でも表示できる
 
-## 4. Phase 4 — Document ingestion / Document Skill
+## 4. Phase 4 — Study flow（Pre → Cycle1..3 → Post）
+本研究の正本仕様は `docs/07_adaptive_learning_design.md` を参照。
+
 実装:
-- upload endpoint
-- parser
-- Document Skill extraction
-- deterministic merge
-- document_skill_revisions / document_skill_entries 保存
+- run 管理（A/B/C, skills_enabled, cycle_count=3）
+- Pre-test（MCQ）: start/submit, 自動採点, 所要時間ログ
+- Material: next/present, 読了 confirm, 所要時間ログ
+- Chat（教材閲覧中のみ）: ask, ログ保存（A/Bのみ）
+- Mini-test（MCQ）: start/submit, 自動採点, 所要時間ログ（Cycle 1..3）
+- Mastery estimate: 推定保存（Cycle 1..3）
+- Post-test（MCQ）: start/submit, 自動採点, 所要時間ログ
+- export（CSV/JSONL）: run/material/read/assessment/attempt/mastery/chat/skills を出力
 
 受け入れ条件:
-- サンプル文書を ingest できる
-- Document Skill entries を確認できる
+- Pre → Cycle1..3 → Post を 1 user で完走できる
+- 教材閲覧時間・テスト所要時間が必ず保存される（時間制限は設けない）
+- チャットは教材閲覧中のみ実行できる（それ以外は拒否）
 
-## 5. Phase 5 — Candidate generation
+## 5. Phase 5 — Generation provider（教材/テスト/回答/推定）
 実装:
-- LLM provider abstraction
-- Gemini provider
-- structured output schema
-- candidate persistence
+- `GenerationProvider` 抽象（教材生成・ミニテスト生成・教材中Q&A・理解度推定・skill delta 抽出）
+- Gemini provider 実装（structured output）
+- prompt_version / model_name / temperature 等メタデータ保存
 
 受け入れ条件:
-- 3 候補が返る
-- Document Skill と Preference Skill が prompt に反映される
-- 生成ログが保存される
+- A/B で同一入力に対して、差分が Skills の有無だけになる（B は skill_profile を入力に含めない）
+- 教材・テスト・回答・推定が JSON schema 通りに生成できる
 
-## 6. Phase 6 — Selection / Feedback
+## 6. Phase 6 — Skills（Aのみ）/ ON-OFF 差分担保
 実装:
-- select API
-- feedback save
-- selected flag update
-- log page reflect
+- skill_profile（テキスト/JSON）の保存・履歴（skill_revisions）
+- worker job: skill update（Aのみ）
+- B/C: skill 参照・更新・反映を無効化（ログは保存）
 
 受け入れ条件:
-- 選択と評価が DB に保存される
-- ログ画面で確認できる
+- A で revision が増え、次サイクルの生成に反映される
+- B で skill_revision が増えない（または更新処理が走らない）
 
-## 7. Phase 7 — SkillUpdater
+## 7. Phase 7 — Group C（固定教材・同一フロー）
 実装:
-- worker job
-- chosen / rejected 比較
-- next skill revision save
-- active revision swap
+- C 用の固定教材リポジトリ（テキスト）
+- Material/Assessment の API は同一だが、C は `source_type=fixed` を返す
+- チャット UI/ API を C では無効化
 
 受け入れ条件:
-- revision が増える
-- 次回生成で新 skill が使われる
-
-## 8. Phase 8 — Experiment mode
-実装:
-- skills_enabled flag
-- UI toggle
-- experiment_runs logging
-- CSV export
-
-受け入れ条件:
-- 同一条件比較が可能
-- export できる
+- C でも Pre → Cycle1..3 → Post を完走できる
+- ログは A/B と同一粒度で保存される（比較可能）
 
 ## 9. テスト方針
 ### backend
 - settings test
-- generate endpoint test
-- select endpoint test
+- run start/finish test
+- pre/mini/post start/submit test（時間ログ含む）
+- materials next/read_confirm test（時間ログ含む）
+- chat ask state guard test（教材閲覧中のみ）
+- mastery estimate persistence test
 - skill merge logic test
-- retrieval repository test
 
 ### frontend
 - component render test
 - API integration smoke test
 
 ### e2e
-- document ingest
-- ask question
-- select candidate
-- skill updated
+- run start
+- pre-test submit
+- cycle1..3: material → read_confirm → mini-test submit → mastery estimate
+- post-test submit
+- export contains durations
+- (A) skill updated and reflected
 
 ## 10. 実装優先度
 ### P0
 - Docker
 - DB
-- generate
-- select
-- skill update
+- run/start-finish + study flow endpoints
+- time logging (material/read + assessment attempts)
+- generation provider (material/quiz/answer/estimate)
 
 ### P1
 - logs
