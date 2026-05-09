@@ -33,8 +33,6 @@ from app.schemas.document_skill import (
     DocumentSkillResponse,
     DocumentSkillRevisionResponse,
 )
-<<<<<<< HEAD
-=======
 from app.schemas.study import (
     AssessmentStartRequest,
     AssessmentStartResponse,
@@ -53,7 +51,6 @@ from app.schemas.study import (
     RunStartRequest,
     RunStartResponse,
 )
->>>>>>> main
 from app.schemas.user import SkillSummaryResponse, UserCreateRequest, UserResponse
 from app.services.chat import (
     generate_candidates_for_chat,

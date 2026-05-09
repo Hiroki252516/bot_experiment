@@ -26,7 +26,6 @@
 - started_at / finished_at
 - provider name / model name / temperature / top_p / prompt_version
 
-<<<<<<< HEAD
 ### Document Skill usage 単位
 - document_id
 - document_skill_revision_id
@@ -34,7 +33,6 @@
 - entry_type
 - included_order
 - context_hash
-=======
 ### 3.2 教材単位（Cycle 1..3）
 - material_id
 - run_id
@@ -44,7 +42,6 @@
 - presented_at
 - read_confirmed_at
 - read_duration_seconds
->>>>>>> main
 
 ### 3.3 テスト定義（Pre/Mini/Post）
 - assessment_id
@@ -102,7 +99,6 @@
 ## 5. 最低限必要なエクスポート（CSV/JSONL）
 MVP では CSV を必須とし、JSONL は任意だが推奨。
 
-<<<<<<< HEAD
 ## 4. 実験条件
 最低限:
 - Condition A: skills_enabled=false
@@ -117,7 +113,6 @@ MVP では CSV を必須とし、JSONL は任意だが推奨。
 - document_skill_entries.csv
 - document_skill_usage_logs.csv
 - retrievals.csv は deprecated header のみ互換維持
-=======
 必須 CSV:
 - runs.csv
 - materials.csv
@@ -127,21 +122,17 @@ MVP では CSV を必須とし、JSONL は任意だが推奨。
 - mastery_estimates.csv（推奨だが欠損許容はしない方がよい）
 - chat_turns.csv（A/Bのみ。C は空でよい）
 - skill_revisions.csv（Aのみ）
->>>>>>> main
 
 ## 6. 再現性のための保存項目
 - provider name
 - model name
-<<<<<<< HEAD
 - temperature
 - top_p
 - candidate_count
 - Document Skill extraction model
 - Document Skill prompt_version
 - Document Skill context budget
-=======
 - temperature / top_p
->>>>>>> main
 - prompt_version
 - cycle_count（=3）
 - group / skills_enabled

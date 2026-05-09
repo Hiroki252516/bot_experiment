@@ -31,7 +31,6 @@ apps/
 - `GET /api/users/{user_id}`
 - `GET /api/users/{user_id}/skills`（Aのみ有効、B/C は空 or 404 でもよいが仕様を固定する）
 
-<<<<<<< HEAD
 ### Documents / Ingestion
 - `POST /api/documents/upload`
 - `POST /api/documents/ingest`
@@ -51,12 +50,10 @@ apps/
 - `POST /api/experiments/runs`
 - `GET /api/experiments/runs`
 - `GET /api/experiments/runs/{run_id}`
-=======
 ### Runs / Experiments
 - `POST /api/runs/start`
 - `POST /api/runs/finish`
 - `GET /api/runs/{run_id}`
->>>>>>> main
 - `GET /api/experiments/export.csv`
 - `GET /api/experiments/export.jsonl`（任意だが推奨）
 
@@ -90,7 +87,6 @@ request example:
 ```json
 {
   "user_id": "u_001",
-<<<<<<< HEAD
   "question": "二次方程式の解き方を教えて",
   "course_context": "math",
   "candidate_count": 3,
@@ -98,10 +94,8 @@ request example:
   "document_skills_enabled": true,
   "document_ids": ["doc_1"],
   "conversation_id": "optional"
-=======
   "group": "A",
   "cycle_count": 3
->>>>>>> main
 }
 ```
 
@@ -112,7 +106,6 @@ response example:
   "user_id": "u_001",
   "group": "A",
   "skills_enabled": true,
-<<<<<<< HEAD
   "retrievals": [],
   "document_skill_contexts": [
     {
@@ -149,7 +142,6 @@ response example:
       "title": "簡潔説明",
       "style_tags": ["short", "direct"],
       "answer_text": "..."
-=======
   "cycle_count": 3,
   "created_at": "2026-05-09T12:00:00Z"
 }
@@ -314,7 +306,6 @@ response example:
       "stem": "string",
       "choices": ["string"],
       "correct_choice_index": 0
->>>>>>> main
     }
   ]
 }
@@ -398,7 +389,6 @@ response example:
 - answer_text
 - created_at
 
-<<<<<<< HEAD
 ### feedback
 - id
 - turn_id
@@ -433,9 +423,7 @@ Legacy table. 新規 Document Skill 経路では `document_skill_usage_logs` を
 - similarity_score
 
 ### skills
-=======
 ### skills（Aのみ）
->>>>>>> main
 - id
 - user_id
 - active_revision_id

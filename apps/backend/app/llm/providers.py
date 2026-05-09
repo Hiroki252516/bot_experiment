@@ -59,8 +59,6 @@ class GenerationProvider(ABC):
     ) -> tuple[DocumentSkillDelta, ProviderMetadata]:
         raise NotImplementedError
 
-<<<<<<< HEAD
-=======
     def generate_material(
         self,
         cycle_index: int,
@@ -78,7 +76,6 @@ class GenerationProvider(ABC):
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         raise NotImplementedError
 
->>>>>>> main
 
 class MockGenerationProvider(GenerationProvider):
     provider_name = "mock"
@@ -454,8 +451,6 @@ class GeminiGenerationProvider(GenerationProvider):
             ),
         )
 
-<<<<<<< HEAD
-=======
     def generate_material(
         self,
         cycle_index: int,
@@ -523,7 +518,6 @@ class GeminiGenerationProvider(GenerationProvider):
             ),
         )
 
->>>>>>> main
 
 class OllamaGenerationProvider(GenerationProvider):
     provider_name = "ollama"
@@ -715,8 +709,6 @@ class OllamaGenerationProvider(GenerationProvider):
             ),
         )
 
-<<<<<<< HEAD
-=======
     def generate_material(
         self,
         cycle_index: int,
@@ -782,7 +774,6 @@ class OllamaGenerationProvider(GenerationProvider):
             ),
         )
 
->>>>>>> main
 
 def _document_skill_prompt(document_metadata: dict, source_unit: dict, previous_document_skill: dict) -> str:
     return (

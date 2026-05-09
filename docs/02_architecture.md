@@ -22,30 +22,24 @@
 - OpenAPI により研究用 UI/API の仕様が明確
 - Pydantic により JSON スキーマを固定しやすい
 
-<<<<<<< HEAD
 ### DB: PostgreSQL + pgvector
 理由:
 - 通常のリレーショナルデータとベクトル検索を同居できる
 - ログ、実験データ、candidate、skill revision を一元管理できる
 - 新規 Document Skill tables と legacy vector tables を同一 DB で管理できる
-=======
 ### DB: PostgreSQL（+ pgvector は維持）
 - 実験 run、教材、テスト、所要時間、推定値、Skills 履歴を一元管理する
 - 本研究では RAG を主題にしないが、インフラ制約として pgvector を残しても運用可能にする（RAG 未使用でも起動可能）
->>>>>>> main
 
 ### Frontend: Next.js
 - 研究フローを「状態遷移」として UI に落とし込みやすい
 - ログ/実験 run の確認 UI を作りやすい
 
 ### Worker
-<<<<<<< HEAD
 理由:
 - Preference Skill 更新、Document Skill extraction などを API リクエストから分離できる
-=======
 - Skills 更新や理解度推定を API リクエストから切り離す（将来の再実行・再計算が容易）
 - 研究段階では同期実行でもよいが、非同期ジョブに分離できる構成を維持する
->>>>>>> main
 
 ## 3. Docker Compose 構成
 必須サービス:
@@ -70,7 +64,6 @@
 - 研究ログ確認（最低限：run 一覧と詳細）
 
 ### backend
-<<<<<<< HEAD
 - REST API
 - session / conversation 管理
 - Document Skill context 構築
@@ -98,7 +91,6 @@
 - skills
 - skill revisions
 - experiment runs
-=======
 - 研究フロー API（run 開始/終了、教材提示、テスト開始/提出、採点、推定）
 - チャット API（教材閲覧中のみ許可）
 - Skills ON/OFF の厳密な差分を担保（A は参照/更新/反映、B はしない）
@@ -119,7 +111,6 @@
 - mastery_estimates（理解度推定履歴）
 - chat_turns（教材紐付け、A/Bのみ）
 - skills / skill_revisions（Aのみ更新）
->>>>>>> main
 
 ## 5. Provider abstraction（RAG 依存を分離）
 本研究で必須なのは「教材生成・ミニテスト生成・読解支援回答・理解度推定・Skills 更新」であり、いずれも LLM による structured output（JSON）を前提とする。
