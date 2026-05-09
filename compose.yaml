@@ -60,13 +60,6 @@ services:
     container_name: tutorbot-ollama
     volumes:
       - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
 
   frontend:
     build:

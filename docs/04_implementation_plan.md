@@ -1,5 +1,7 @@
 # 04 Implementation Plan
 
+> 2026-05 update: Phase 4 は runtime RAG ではなく **Document Skill extraction** を実装対象とする。Phase 5 の候補生成は `Document Agent Skills JSON` と `Preference Skill JSON` を prompt に渡す。
+
 ## 1. Phase 1 — Repo skeleton
 受け入れ条件:
 - monorepo ができている
@@ -33,6 +35,17 @@
 - 画面遷移できる
 - mock API でも表示できる
 
+## 4. Phase 4 — Document ingestion / Document Skill
+実装:
+- upload endpoint
+- parser
+- Document Skill extraction
+- deterministic merge
+- document_skill_revisions / document_skill_entries 保存
+
+受け入れ条件:
+- サンプル文書を ingest できる
+- Document Skill entries を確認できる
 ## 4. Phase 4 — Study flow（Pre → Cycle1..3 → Post）
 本研究の正本仕様は `docs/07_adaptive_learning_design.md` を参照。
 
@@ -58,6 +71,9 @@
 - prompt_version / model_name / temperature 等メタデータ保存
 
 受け入れ条件:
+- 3 候補が返る
+- Document Skill と Preference Skill が prompt に反映される
+- 生成ログが保存される
 - A/B で同一入力に対して、差分が Skills の有無だけになる（B は skill_profile を入力に含めない）
 - 教材・テスト・回答・推定が JSON schema 通りに生成できる
 
