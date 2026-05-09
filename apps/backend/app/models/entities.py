@@ -237,3 +237,99 @@ class IngestionJob(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# --- Study flow entities (Pre → Cycle1..3 → Post) ---
+
+
+class StudyRun(Base):
+    __tablename__ = "study_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    group: Mapped[str] = mapped_column(String(1))  # A|B|C
+    skills_enabled: Mapped[bool] = mapped_column(Boolean)
+    cycle_count: Mapped[int] = mapped_column(Integer, default=3)
+    provider_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top_p: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StudyMaterial(Base):
+    __tablename__ = "study_materials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    cycle_index: Mapped[int] = mapped_column(Integer)
+    source_type: Mapped[str] = mapped_column(String(20))  # generated|fixed
+    content_text: Mapped[str] = mapped_column(Text)
+    difficulty: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyMaterialRead(Base):
+    __tablename__ = "study_material_reads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    material_id: Mapped[str] = mapped_column(ForeignKey("study_materials.id"))
+    presented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    read_confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_seconds: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyAssessment(Base):
+    __tablename__ = "study_assessments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    assessment_type: Mapped[str] = mapped_column(String(20))  # pre_test|mini_test|post_test
+    cycle_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_json: Mapped[dict] = mapped_column(JSON, default=dict)  # MCQ schema
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyAssessmentAttempt(Base):
+    __tablename__ = "study_assessment_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    assessment_id: Mapped[str] = mapped_column(ForeignKey("study_assessments.id"))
+    assessment_type: Mapped[str] = mapped_column(String(20))
+    cycle_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    answers_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyMasteryEstimate(Base):
+    __tablename__ = "study_mastery_estimates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    cycle_index: Mapped[int] = mapped_column(Integer)
+    estimate_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyChatTurn(Base):
+    __tablename__ = "study_chat_turns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("study_runs.id"))
+    material_id: Mapped[str] = mapped_column(ForeignKey("study_materials.id"))
+    cycle_index: Mapped[int] = mapped_column(Integer)
+    question_text: Mapped[str] = mapped_column(Text)
+    answer_text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
