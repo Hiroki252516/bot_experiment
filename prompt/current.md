@@ -288,7 +288,7 @@ Learner Agent Skill には最低限以下を含めてください。
 - result_summaries.csv
 
 13. LLM provider abstraction を整備する
-- Gemini を default provider としてください。
+- ollamaでgemma4:e2bを動かす
 - mock provider を用意し、API key なしでも end-to-end flow を確認できるようにしてください。
 - すべての LLM 出力は structured JSON を基本にしてください。
 - JSON schema validation を必ず行ってください。
@@ -309,7 +309,7 @@ README に以下を明記してください。
 - Docker 起動方法
 - .env 設定
 - mock provider での動作確認方法
-- Gemini provider の設定方法
+- ollama provider の設定方法
 - 管理者の操作手順
 - 被験者の操作手順
 - 10 サイクル完走手順
