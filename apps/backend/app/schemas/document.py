@@ -12,6 +12,11 @@ class DocumentResponse(BaseModel):
     source_type: str
     ingest_status: str
     created_at: datetime
+    document_skill_status: str | None = None
+    active_document_skill_revision_id: str | None = None
+    document_skill_revision_number: int | None = None
+    document_skill_entries_count: int = 0
+    document_skill_updated_at: datetime | None = None
 
 
 class IngestJobResponse(BaseModel):

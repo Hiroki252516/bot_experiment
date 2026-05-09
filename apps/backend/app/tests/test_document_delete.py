@@ -4,7 +4,17 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from app.models.entities import Embedding, IngestionJob, RagDocument, RagDocumentChunk, RetrievalLog
+from app.models.entities import (
+    DocumentSkill,
+    DocumentSkillEntry,
+    DocumentSkillRevision,
+    DocumentSkillUsageLog,
+    Embedding,
+    IngestionJob,
+    RagDocument,
+    RagDocumentChunk,
+    RetrievalLog,
+)
 from app.rag.retrieval import retrieve_chunks
 from app.services.documents import delete_document
 
@@ -41,6 +51,43 @@ def _create_document_with_rag_rows(session, storage_path: Path) -> tuple[RagDocu
         )
     )
     session.add(IngestionJob(document_id=document.id, status="completed"))
+    document_skill = DocumentSkill(document_id=document.id, status="completed")
+    session.add(document_skill)
+    session.flush()
+    revision = DocumentSkillRevision(
+        document_skill_id=document_skill.id,
+        revision_number=1,
+        profile_json={"summary": "test"},
+        summary="test",
+        extraction_model_name="mock-model",
+        prompt_version="test",
+        source_digest=document.sha256,
+        update_reason="test",
+    )
+    session.add(revision)
+    session.flush()
+    entry = DocumentSkillEntry(
+        document_skill_revision_id=revision.id,
+        entry_type="fact",
+        title="test",
+        content="retrieval target",
+        normalized_text="retrieval target",
+        metadata_json={},
+    )
+    session.add(entry)
+    session.flush()
+    document_skill.active_revision_id = revision.id
+    session.add(
+        DocumentSkillUsageLog(
+            chat_message_id="fake-message-id",
+            document_id=document.id,
+            document_skill_revision_id=revision.id,
+            document_skill_entry_id=entry.id,
+            included_order=1,
+            context_kind="fact",
+            context_hash="0" * 64,
+        )
+    )
     session.add(
         RetrievalLog(
             chat_message_id="fake-message-id",
@@ -64,6 +111,8 @@ def test_delete_document_removes_related_rows_and_file(session, tmp_path) -> Non
     assert session.scalar(select(Embedding.id).where(Embedding.chunk_id == chunk.id)) is None
     assert session.scalar(select(IngestionJob.id).where(IngestionJob.document_id == document.id)) is None
     assert session.scalar(select(RetrievalLog.id).where(RetrievalLog.chunk_id == chunk.id)) is None
+    assert session.scalar(select(DocumentSkill.id).where(DocumentSkill.document_id == document.id)) is None
+    assert session.scalar(select(DocumentSkillUsageLog.id).where(DocumentSkillUsageLog.document_id == document.id)) is None
     assert not Path(document.storage_path).exists()
 
 

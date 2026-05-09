@@ -177,6 +177,62 @@ class RagDocument(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class DocumentSkill(Base):
+    __tablename__ = "document_skills"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("rag_documents.id"), unique=True)
+    active_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentSkillRevision(Base):
+    __tablename__ = "document_skill_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    document_skill_id: Mapped[str] = mapped_column(ForeignKey("document_skills.id"))
+    revision_number: Mapped[int] = mapped_column(Integer)
+    profile_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    extraction_model_name: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    source_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    update_reason: Mapped[str] = mapped_column(Text, default="document_skill_extraction")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentSkillEntry(Base):
+    __tablename__ = "document_skill_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    document_skill_revision_id: Mapped[str] = mapped_column(ForeignKey("document_skill_revisions.id"))
+    entry_type: Mapped[str] = mapped_column(String(50))
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_span: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentSkillUsageLog(Base):
+    __tablename__ = "document_skill_usage_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    chat_message_id: Mapped[str] = mapped_column(ForeignKey("chat_messages.id"))
+    document_id: Mapped[str] = mapped_column(ForeignKey("rag_documents.id"))
+    document_skill_revision_id: Mapped[str] = mapped_column(ForeignKey("document_skill_revisions.id"))
+    document_skill_entry_id: Mapped[str | None] = mapped_column(ForeignKey("document_skill_entries.id"), nullable=True)
+    included_order: Mapped[int] = mapped_column(Integer)
+    context_kind: Mapped[str] = mapped_column(String(50), default="entry")
+    context_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class RagDocumentChunk(Base):
     __tablename__ = "rag_document_chunks"
 

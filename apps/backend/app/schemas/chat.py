@@ -12,6 +12,7 @@ class ChatGenerateRequest(BaseModel):
     course_context: str | None = None
     candidate_count: int = 3
     skills_enabled: bool = True
+    document_skills_enabled: bool = True
     session_id: str | None = None
     experiment_condition: str | None = None
 
@@ -41,6 +42,23 @@ class CandidateResponse(BaseModel):
     display_order: int
 
 
+class DocumentSkillContextEntryResponse(BaseModel):
+    entry_id: str
+    entry_type: str
+    title: str
+    content: str
+    source_page: int | None = None
+    source_span: str | None = None
+    included_order: int
+
+
+class DocumentSkillContextResponse(BaseModel):
+    document_id: str
+    filename: str
+    document_skill_revision_id: str
+    entries: list[DocumentSkillContextEntryResponse]
+
+
 class ChatGenerateResponse(BaseModel):
     session_id: str
     chat_message_id: str
@@ -48,6 +66,7 @@ class ChatGenerateResponse(BaseModel):
     skills_enabled: bool
     active_skill_revision_id: str | None
     retrievals: list[RetrievalItemResponse]
+    document_skill_contexts: list[DocumentSkillContextResponse] = Field(default_factory=list)
     candidates: list[CandidateResponse]
 
 
@@ -73,6 +92,7 @@ class SessionMessageDetail(BaseModel):
     candidates: list[CandidateResponse]
     selection: dict | None
     retrievals: list[RetrievalItemResponse]
+    document_skill_contexts: list[DocumentSkillContextResponse] = Field(default_factory=list)
     created_at: datetime
 
 

@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     default_chunk_size: int = 1200
     default_chunk_overlap: int = 200
     embedding_dimensions: int = 768
+    document_skill_context_max_chars: int = 12000
+    document_skill_max_entries: int = 80
+    document_skill_include_source_excerpts: bool = True
     skill_updater_poll_interval_seconds: int = 5
     job_batch_size: int = 10
 

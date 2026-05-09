@@ -1,5 +1,7 @@
 # 05 Evaluation Protocol
 
+> 2026-05 update: runtime retrieval logs は legacy。教材参照の評価単位は **document_skill_usage_logs** と **document_skill_entries**。
+
 ## 1. 目的
 研究仮説を検証するため、skills の蓄積有無が
 1. ユーザーが選択する回答の予測可能性
@@ -18,9 +20,13 @@
 - model_name
 - prompt_version
 
-### retrieval 単位
-- retrieved chunk ids
-- similarity scores
+### Document Skill usage 単位
+- document_id
+- document_skill_revision_id
+- document_skill_entry_id
+- entry_type
+- included_order
+- context_hash
 
 ### candidate 単位
 - candidate_id
@@ -65,7 +71,10 @@
 - candidates.csv
 - feedback.csv
 - skill_revisions.csv
-- retrievals.csv
+- document_skill_revisions.csv
+- document_skill_entries.csv
+- document_skill_usage_logs.csv
+- retrievals.csv は deprecated header のみ互換維持
 
 ## 6. 再現性のための保存項目
 - provider name
@@ -73,9 +82,9 @@
 - temperature
 - top_p
 - candidate_count
-- embedding model
-- chunking strategy
-- retrieval top_k
+- Document Skill extraction model
+- Document Skill prompt_version
+- Document Skill context budget
 - prompt_version
 
 ## 7. 研究上の注意

@@ -1,5 +1,7 @@
 # 03 API / DB / JSON Schema
 
+> 2026-05 update: `rag_documents` は upload metadata として当面再利用するが、`rag_document_chunks` / `embeddings` / `retrieval_logs` は legacy。新規 API / Chat response は Document Skill fields を正式経路にする。
+
 ## 1. 推奨ディレクトリ
 ```text
 apps/
@@ -33,6 +35,9 @@ apps/
 - `POST /api/documents/ingest`
 - `GET /api/documents`
 - `GET /api/documents/{document_id}/chunks`
+- `GET /api/documents/{document_id}/skill`
+- `GET /api/documents/{document_id}/skill/revisions`
+- `GET /api/documents/{document_id}/skill/entries`
 
 ### Chat
 - `POST /api/chat/generate`
@@ -58,6 +63,8 @@ apps/
   "course_context": "math",
   "candidate_count": 3,
   "skills_enabled": true,
+  "document_skills_enabled": true,
+  "document_ids": ["doc_1"],
   "conversation_id": "optional"
 }
 ```
@@ -68,12 +75,22 @@ apps/
   "conversation_id": "conv_xxx",
   "turn_id": "turn_xxx",
   "skills_enabled": true,
-  "retrievals": [
+  "retrievals": [],
+  "document_skill_contexts": [
     {
-      "chunk_id": "chunk_1",
       "document_id": "doc_1",
-      "score": 0.88,
-      "text": "..."
+      "filename": "lesson.pdf",
+      "document_skill_revision_id": "dsr_1",
+      "entries": [
+        {
+          "entry_id": "dse_1",
+          "entry_type": "procedure",
+          "title": "第1回課題",
+          "content": "01 フォルダを作成し、HTML ファイルを提出する。",
+          "source_page": 1,
+          "included_order": 1
+        }
+      ]
     }
   ],
   "candidates": [
@@ -164,6 +181,7 @@ apps/
 - created_at
 
 ### chunks
+Legacy table. 新規 Document Skill 経路では作成・参照しない。
 - id
 - document_id
 - chunk_index
@@ -173,6 +191,7 @@ apps/
 - metadata jsonb
 
 ### turn_retrievals
+Legacy table. 新規 Document Skill 経路では `document_skill_usage_logs` を使う。
 - id
 - turn_id
 - chunk_id

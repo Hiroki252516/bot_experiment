@@ -100,10 +100,18 @@ def test_ollama_generate_candidates_parses_chat_response(monkeypatch: pytest.Mon
 
     candidates, metadata = provider.generate_candidates(
         question="一次方程式とは何ですか？",
-        retrievals=[{"text": "一次方程式は未知数の一次式を含む等式です。"}],
-        skill_profile={},
+        preference_skill_profile={},
+        document_skill_context={
+            "documents": [
+                {
+                    "filename": "math.md",
+                    "entries": [{"title": "一次方程式", "content": "一次方程式は未知数の一次式を含む等式です。"}],
+                }
+            ]
+        },
         candidate_count=3,
-        skills_enabled=True,
+        personalization_skills_enabled=True,
+        document_skills_enabled=True,
     )
 
     assert len(candidates.candidates) == 3
@@ -137,10 +145,11 @@ def test_ollama_candidate_count_mismatch_raises(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(RuntimeError, match="expected 3"):
         provider.generate_candidates(
             question="一次方程式とは何ですか？",
-            retrievals=[],
-            skill_profile={},
+            preference_skill_profile={},
+            document_skill_context={"documents": []},
             candidate_count=3,
-            skills_enabled=True,
+            personalization_skills_enabled=True,
+            document_skills_enabled=True,
         )
 
 
@@ -181,8 +190,41 @@ def test_ollama_invalid_json_raises_clear_error(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(RuntimeError, match="Ollama returned invalid JSON"):
         provider.generate_candidates(
             question="一次方程式とは何ですか？",
-            retrievals=[],
-            skill_profile={},
+            preference_skill_profile={},
+            document_skill_context={"documents": []},
             candidate_count=3,
-            skills_enabled=True,
+            personalization_skills_enabled=True,
+            document_skills_enabled=True,
         )
+
+
+def test_ollama_extract_document_skill_delta_parses_chat_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = _ollama_payload(
+        {
+            "document_title": "lesson.pdf",
+            "summary": "HTML ファイル提出課題の説明。",
+            "learning_objectives": [],
+            "key_concepts": [],
+            "definitions": [],
+            "facts": [{"statement": "拡張子は .html にする。", "source_pages": [1]}],
+            "procedures": [{"title": "第1回課題", "steps": ["01フォルダを作成する", "HTMLファイルを提出する"], "source_pages": [1]}],
+            "examples": [],
+            "formulas": [],
+            "warnings": [],
+            "common_misconceptions": [],
+            "answering_guidelines": [],
+            "source_map": [{"excerpt": "01というフォルダを作成", "page": 1, "source_span": "page:1"}],
+        }
+    )
+    _patch_ollama_client(monkeypatch, payload)
+    provider = OllamaGenerationProvider(_settings())
+
+    delta, metadata = provider.extract_document_skill_delta(
+        document_metadata={"filename": "lesson.pdf"},
+        source_unit={"text": "01というフォルダを作成し、HTMLファイルを提出する。", "source_page": 1},
+        previous_document_skill={},
+    )
+
+    assert delta.facts[0].statement == "拡張子は .html にする。"
+    assert delta.procedures[0].title == "第1回課題"
+    assert metadata.provider_name == "ollama"

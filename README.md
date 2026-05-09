@@ -3,7 +3,7 @@
 研究用プロトタイプとして、学習者の回答選択と主観評価をもとにユーザー別 `Skill` を更新し、次回以降の回答生成に反映するローカル実行前提のチュータリングチャットボットです。
 
 ## Repo Structure
-- `apps/backend`: FastAPI API, SQLAlchemy models, Alembic migrations, RAG, generation/embedding provider abstractions, export logic
+- `apps/backend`: FastAPI API, SQLAlchemy models, Alembic migrations, Document Skill extraction, generation provider abstraction, export logic
 - `apps/frontend`: Next.js App Router UI for chat, logs, and admin workflows
 - `apps/worker`: PostgreSQL polling worker for ingestion and skill-update jobs
 - `packages/shared-schemas`: OpenAPI 由来の共有型を置くための予約領域
@@ -14,12 +14,12 @@
 - Docker Compose ベースの monorepo 構成
 - PostgreSQL + pgvector 前提の初期スキーマ
 - 文書 upload と ingest job 作成
-- chunking / embedding / retrieval の worker 処理
-- 質問送信時の retrieval + 3候補生成
+- 教材 upload と Document Skill extraction worker 処理
+- 質問送信時の Document Skill context + 3候補生成
 - 候補選択、満足度・わかりやすさ・コメント保存
 - chosen / non-chosen を使う `SkillUpdater`
 - `skills_enabled` ON/OFF 実験ログ保存
-- `turns.csv`、`candidates.csv`、`feedback.csv`、`skill_revisions.csv`、`retrievals.csv` を含む `logs.zip` export
+- `turns.csv`、`candidates.csv`、`feedback.csv`、`skill_revisions.csv`、`document_skill_revisions.csv`、`document_skill_entries.csv`、`document_skill_usage_logs.csv` を含む `logs.zip` export
 - Chat / Logs / Admin の最低限 UI
 - ユーザー名/パスワード登録、ログイン、HttpOnly Cookie セッション
 
@@ -29,7 +29,7 @@
 - Database: PostgreSQL 16, pgvector
 - Worker: Python polling worker
 - Default generation provider: Gemini Developer API
-- Default embedding provider: local `sentence-transformers`
+- Legacy embedding provider: local `sentence-transformers`。新規 runtime 生成経路では embedding / vector retrieval を使いません。
 - Test/dev fallback providers: `mock`
 
 ## Environment Setup
@@ -40,7 +40,7 @@ cp .env.example .env
 2. Gemini で回答生成する場合は `.env` の `GEMINI_API_KEY` を設定します。
 3. Mac host の Ollama で回答生成する場合は、host 側で Ollama を起動し、`.env` に `GENERATION_PROVIDER=ollama` と `LLM_PROVIDER=ollama` を設定します。
 4. API キーなしでローカル挙動だけ確認したい場合は `.env` の `GENERATION_PROVIDER=mock` と `EMBEDDING_PROVIDER=mock` を使ってください。
-5. 既定では RAG embedding に `pkshatech/GLuCoSE-base-ja` を使います。初回 ingest または prefetch 時にモデルをダウンロードし、`model_cache` volume に保存します。
+5. 新規 ingestion は教材を Document Skill entries に変換します。legacy RAG embedding 設定は後方互換・比較用に残しています。
 
 主な環境変数:
 - `DATABASE_URL`
@@ -56,6 +56,9 @@ cp .env.example .env
 - `LOCAL_EMBED_DEVICE`
 - `EMBEDDING_DIMENSIONS`
 - `MIN_RETRIEVAL_SCORE`
+- `DOCUMENT_SKILL_CONTEXT_MAX_CHARS`
+- `DOCUMENT_SKILL_MAX_ENTRIES`
+- `DOCUMENT_SKILL_INCLUDE_SOURCE_EXCERPTS`
 - `HF_HOME`
 - `SENTENCE_TRANSFORMERS_HOME`
 - `UPLOAD_DIR`
@@ -90,8 +93,8 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 ## Minimal Workflow
 1. Chat UI の利用前に `/register` で新規登録するか `/login` でログインする
 2. Admin 画面から教材を upload し、ingest job を作成する
-3. worker が chunking と embedding を実行する
-4. Chat 画面で質問し、3候補を受け取る
+3. worker が Document Skill extraction を実行し、entries を保存する
+4. Chat 画面で参照対象教材を選び、3候補を受け取る
 5. 候補を1つ選択して満足度・わかりやすさ・コメントを送る
 6. worker が `skill_update_job` を処理し、新 revision を保存する
 7. 次回生成時に `skills_enabled=true` なら最新 skill を prompt に反映する
@@ -109,6 +112,9 @@ docker compose -f compose.yaml -f compose.research.yaml up --build
 - `POST /api/documents/{document_id}/ingest`
 - `GET /api/documents`
 - `GET /api/documents/{document_id}/chunks`
+- `GET /api/documents/{document_id}/skill`
+- `GET /api/documents/{document_id}/skill/revisions`
+- `GET /api/documents/{document_id}/skill/entries`
 - `POST /api/chat/generate`
 - `POST /api/chat/select`
 - `GET /api/chat/sessions/{session_id}`
@@ -143,8 +149,18 @@ AUTH_SESSION_DAYS=7
 docker compose run --rm backend python -m app.scripts.seed_sample_data
 ```
 
-## Local Embeddings
-回答生成と SkillUpdater は `GENERATION_PROVIDER` を使い、RAG の document/query embedding は `EMBEDDING_PROVIDER` を使います。既定は以下です。
+## Document Skills And Legacy Embeddings
+現在の回答生成は runtime RAG ではなく、ingestion 時に抽出した Document Skill entries を deterministic に選び、prompt に渡します。`skills_enabled` はユーザー別 Preference Skill の ON/OFF、`document_skills_enabled` は Document Skill context の ON/OFF です。
+
+Document Skill の context budget:
+
+```env
+DOCUMENT_SKILL_CONTEXT_MAX_CHARS=12000
+DOCUMENT_SKILL_MAX_ENTRIES=80
+DOCUMENT_SKILL_INCLUDE_SOURCE_EXCERPTS=true
+```
+
+`rag_document_chunks`、`embeddings`、`retrieval_logs`、pgvector 関連のコードは legacy として残しています。新規 upload / ingest / chat では embedding / vector retrieval を呼びません。後方互換・比較用の既定は以下です。
 
 ```env
 GENERATION_PROVIDER=gemini
@@ -156,19 +172,17 @@ EMBEDDING_DIMENSIONS=768
 
 Docker Compose 内では CPU fallback を前提にします。Apple Silicon の MPS を使いたい場合、Linux container から直接 MPS を使う前提にはせず、将来用の `EMBEDDING_PROVIDER=local-http` で macOS host 側の embedding service を呼ぶ設計です。
 
-モデルを事前取得したい場合:
+legacy embedding モデルを事前取得したい場合:
 ```bash
 docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
 ```
 
-Gemini embedding 由来の既存 vector と local embedding は同じ 768 次元でも混在検索しません。実装上は active `provider_name/model_name/dimensions` で retrieval を絞りますが、検索品質を保つため、provider/model を切り替えた後は対象 document を再 ingest してください。
+既存の legacy vector は Document Skill 経路では使われません。教材を更新した場合は対象 document の ingest job を再実行し、新しい Document Skill revision を作成してください。
 
-Chat 画面では検索対象教材を選択できます。初期状態では直近の uploaded かつ completed の教材が選択されます。未選択の場合、通常検索では `source_type=seed` の教材を除外し、uploaded 教材全体を検索します。seed 教材を使いたい場合は明示的に選択してください。
-
-`MIN_RETRIEVAL_SCORE` 未満の検索結果しかない場合、まず日本語キーワードの LIKE fallback を実行します。それでも閾値を超える候補がなければ LLM 生成を行わず、回答候補は「資料中に該当箇所が見つかりません。」になります。
+Chat 画面では参照対象教材を選択できます。初期状態では直近の uploaded かつ completed の教材が選択されます。未選択の場合、`source_type=seed` の教材を除外し、uploaded 教材全体の Document Skill entries を参照します。seed 教材を使いたい場合は明示的に選択してください。
 
 ## Ollama Generation
-回答生成と SkillUpdater は `GENERATION_PROVIDER=ollama` で Mac host 側の Ollama に切り替えられます。embedding は `EMBEDDING_PROVIDER=local-sentence-transformers` のまま使えます。
+回答生成、SkillUpdater、Document Skill extraction は `GENERATION_PROVIDER=ollama` で Mac host 側の Ollama に切り替えられます。runtime embedding は使用しません。
 
 ```env
 GENERATION_PROVIDER=ollama
@@ -176,7 +190,7 @@ LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 OLLAMA_MODEL_GENERATE=gemma4:e2b
 OLLAMA_REQUEST_TIMEOUT_SECONDS=120
-EMBEDDING_PROVIDER=local-sentence-transformers
+EMBEDDING_PROVIDER=local-sentence-transformers # legacy / comparison only
 ```
 
 Ollama は Docker container 内ではなく macOS host 側で起動します。backend container からは Docker Desktop の `host.docker.internal:11434` 経由で接続します。
@@ -190,7 +204,7 @@ curl http://localhost:11434/api/chat \
 docker compose exec backend python -c "import httpx; print(httpx.get('http://host.docker.internal:11434/api/tags').status_code)"
 ```
 
-`.env` を Ollama 設定にした後、`docker compose up --build` で起動し、PDF ingest 完了後に Chat で質問して3候補が返ることを確認してください。Ollama が未起動、モデル未取得、または JSON schema に合わない応答を返した場合、`/api/chat/generate` は 502 を返します。
+`.env` を Ollama 設定にした後、`docker compose up --build` で起動し、PDF の Document Skill extraction 完了後に Chat で質問して3候補が返ることを確認してください。Ollama が未起動、モデル未取得、または JSON schema に合わない応答を返した場合、`/api/chat/generate` は 502 を返します。
 初回モデルロードや長い回答で時間がかかる場合は、`OLLAMA_REQUEST_TIMEOUT_SECONDS` を増やしてください。
 
 失敗または途中停止した ingest を再試行したい場合は、対象 document の状態と job 状態を `pending` に戻します。
@@ -222,7 +236,7 @@ SET status = 'pending',
 WHERE status IN ('failed', 'running');
 ```
 
-Admin 画面から教材を削除すると、対象の `ingestion_jobs`、`rag_document_chunks`、`embeddings`、該当 chunk に紐づく `retrieval_logs`、`rag_documents`、保存済みファイル本体を hard delete します。実験本番後に削除すると、過去の検索ログや評価データの解釈に影響するため注意してください。研究ログを保持したい段階では、削除前に export を取得するか、将来的な soft delete 化を検討してください。
+Admin 画面から教材を削除すると、対象の `document_skills`、`document_skill_revisions`、`document_skill_entries`、`document_skill_usage_logs`、`ingestion_jobs`、legacy `rag_document_chunks` / `embeddings` / `retrieval_logs`、`rag_documents`、保存済みファイル本体を hard delete します。実験本番後に削除すると、過去の Document Skill usage logs や評価データの解釈に影響するため注意してください。研究ログを保持したい段階では、削除前に export を取得するか、将来的な soft delete 化を検討してください。
 
 ## Tests And Checks
 frontend:
@@ -241,7 +255,7 @@ docker compose run --rm backend pytest app/tests -q
 ## Notes
 - `GeminiGenerationProvider` は Google AI Developer API の `generateContent` を使う実装です。
 - `OllamaGenerationProvider` は Mac host 側 Ollama の `/api/chat` を使い、`stream=false` と JSON schema `format` で構造化 JSON 応答を要求します。
-- `GeminiEmbeddingProvider` は後方互換・比較用に残していますが、既定の embedding provider ではありません。
+- `GeminiEmbeddingProvider` と legacy retrieval は後方互換・比較用に残していますが、新規 runtime 生成経路では使いません。
 - `MockGenerationProvider` と `MockEmbeddingProvider` は API キーなしで縦スライスを確認するための決定的なテスト用実装です。
 - skill 更新は `LLM で差分抽出` と `アプリ側の deterministic merge` を分けています。
 - export は単一 CSV ではなく、研究評価向けの複数 CSV を zip 化しています。

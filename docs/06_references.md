@@ -1,5 +1,7 @@
 # 06 References
 
+> 2026-05 update: pgvector / embedding references are retained for legacy RAG compatibility. The active prototype path uses Document Agent Skills extracted at ingestion time.
+
 ## Research references
 - SocraticLM: Exploring Socratic Personalized Teaching with Large Language Models  
   https://proceedings.neurips.cc/paper_files/paper/2024/hash/9bae399d1f34b8650351c1bd3692aeae-Abstract-Conference.html
