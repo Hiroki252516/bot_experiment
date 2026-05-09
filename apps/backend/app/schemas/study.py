@@ -75,6 +75,7 @@ class AssessmentStartResponse(BaseModel):
     assessment_type: AssessmentType
     cycle_index: int | None
     started_at: datetime
+    content_json: dict
 
 
 class McqAnswer(BaseModel):

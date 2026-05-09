@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_session
 from app.core.config import get_settings
 from app.llm.providers import get_generation_model_name
-from app.models.entities import StudyRun, User
+from app.models.entities import StudyAssessment, StudyRun, User
 from app.schemas.admin import (
     AdminRecomputeResponse,
     ExperimentRunCreateRequest,
@@ -186,12 +186,16 @@ def material_read_confirm_route(
 @router.post("/api/assessments/start", response_model=AssessmentStartResponse)
 def assessment_start_route(payload: AssessmentStartRequest, session: Session = Depends(get_session)) -> AssessmentStartResponse:
     attempt = start_assessment(session, payload.run_id, payload.assessment_type, payload.cycle_index)
+    assessment = session.get(StudyAssessment, attempt.assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=500, detail="Assessment missing")
     return AssessmentStartResponse(
         assessment_attempt_id=attempt.id,
         assessment_id=attempt.assessment_id,
         assessment_type=attempt.assessment_type,  # type: ignore[arg-type]
         cycle_index=attempt.cycle_index,
         started_at=attempt.started_at,
+        content_json=assessment.content_json,
     )
 
 

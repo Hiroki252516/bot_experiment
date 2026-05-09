@@ -1,6 +1,5 @@
-import { ChatWorkspace } from "../components/chat-workspace";
+import { StudyWorkspace } from "../components/study-workspace";
 
 export default function HomePage() {
-  return <ChatWorkspace />;
+  return <StudyWorkspace />;
 }
-
