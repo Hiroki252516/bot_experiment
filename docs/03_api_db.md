@@ -2,6 +2,8 @@
 
 本書は研究フローに必要な API/DB/JSON schema を定義する。研究仕様の正本は `docs/07_adaptive_learning_design.md`。
 
+> 2026-05 update: `rag_documents` は upload metadata として当面再利用するが、`rag_document_chunks` / `embeddings` / `retrieval_logs` は legacy。新規 API / Chat response は Document Skill fields を正式経路にする。
+
 ## 1. 推奨ディレクトリ
 ```text
 apps/
@@ -29,6 +31,25 @@ apps/
 - `GET /api/users/{user_id}`
 - `GET /api/users/{user_id}/skills`（Aのみ有効、B/C は空 or 404 でもよいが仕様を固定する）
 
+### Documents / Ingestion
+- `POST /api/documents/upload`
+- `POST /api/documents/ingest`
+- `GET /api/documents`
+- `GET /api/documents/{document_id}/chunks`
+- `GET /api/documents/{document_id}/skill`
+- `GET /api/documents/{document_id}/skill/revisions`
+- `GET /api/documents/{document_id}/skill/entries`
+
+### Chat
+- `POST /api/chat/generate`
+- `POST /api/chat/select`
+- `GET /api/chat/logs/{user_id}`
+- `GET /api/chat/turns/{turn_id}`
+
+### Experiments
+- `POST /api/experiments/runs`
+- `GET /api/experiments/runs`
+- `GET /api/experiments/runs/{run_id}`
 ### Runs / Experiments
 - `POST /api/runs/start`
 - `POST /api/runs/finish`
@@ -66,6 +87,13 @@ request example:
 ```json
 {
   "user_id": "u_001",
+  "question": "二次方程式の解き方を教えて",
+  "course_context": "math",
+  "candidate_count": 3,
+  "skills_enabled": true,
+  "document_skills_enabled": true,
+  "document_ids": ["doc_1"],
+  "conversation_id": "optional"
   "group": "A",
   "cycle_count": 3
 }
@@ -78,6 +106,42 @@ response example:
   "user_id": "u_001",
   "group": "A",
   "skills_enabled": true,
+  "retrievals": [],
+  "document_skill_contexts": [
+    {
+      "document_id": "doc_1",
+      "filename": "lesson.pdf",
+      "document_skill_revision_id": "dsr_1",
+      "entries": [
+        {
+          "entry_id": "dse_1",
+          "entry_type": "procedure",
+          "title": "第1回課題",
+          "content": "01 フォルダを作成し、HTML ファイルを提出する。",
+          "source_page": 1,
+          "included_order": 1
+        }
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "cand_1",
+      "title": "ヒント中心",
+      "style_tags": ["hint-first", "stepwise"],
+      "answer_text": "..."
+    },
+    {
+      "candidate_id": "cand_2",
+      "title": "例題中心",
+      "style_tags": ["example-first"],
+      "answer_text": "..."
+    },
+    {
+      "candidate_id": "cand_3",
+      "title": "簡潔説明",
+      "style_tags": ["short", "direct"],
+      "answer_text": "..."
   "cycle_count": 3,
   "created_at": "2026-05-09T12:00:00Z"
 }
@@ -325,6 +389,40 @@ response example:
 - answer_text
 - created_at
 
+### feedback
+- id
+- turn_id
+- selected_candidate_id
+- satisfaction_score
+- clarity_score
+- comment
+- created_at
+
+### documents
+- id
+- filename
+- mime_type
+- source_type
+- created_at
+
+### chunks
+Legacy table. 新規 Document Skill 経路では作成・参照しない。
+- id
+- document_id
+- chunk_index
+- content
+- token_count
+- embedding vector
+- metadata jsonb
+
+### turn_retrievals
+Legacy table. 新規 Document Skill 経路では `document_skill_usage_logs` を使う。
+- id
+- turn_id
+- chunk_id
+- similarity_score
+
+### skills
 ### skills（Aのみ）
 - id
 - user_id

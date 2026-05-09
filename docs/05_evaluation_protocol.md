@@ -2,6 +2,8 @@
 
 本書は `docs/07_adaptive_learning_design.md` の研究フロー（Pre → Cycle1..3 → Post）を前提に、保存ログと評価指標を定義する。
 
+> 2026-05 update: runtime retrieval logs は legacy。教材参照の評価単位は **document_skill_usage_logs** と **document_skill_entries**。
+
 ## 1. 目的
 研究仮説を検証する。
 - 仮説: **学習ログに基づく適応型（Group A: Skillsあり）は、非適応型（Group B: Skillsなし）より学習効果を向上させる。**
@@ -24,6 +26,13 @@
 - started_at / finished_at
 - provider name / model name / temperature / top_p / prompt_version
 
+### Document Skill usage 単位
+- document_id
+- document_skill_revision_id
+- document_skill_entry_id
+- entry_type
+- included_order
+- context_hash
 ### 3.2 教材単位（Cycle 1..3）
 - material_id
 - run_id
@@ -90,6 +99,20 @@
 ## 5. 最低限必要なエクスポート（CSV/JSONL）
 MVP では CSV を必須とし、JSONL は任意だが推奨。
 
+## 4. 実験条件
+最低限:
+- Condition A: skills_enabled=false
+- Condition B: skills_enabled=true
+
+## 5. 最低限必要な CSV
+- turns.csv
+- candidates.csv
+- feedback.csv
+- skill_revisions.csv
+- document_skill_revisions.csv
+- document_skill_entries.csv
+- document_skill_usage_logs.csv
+- retrievals.csv は deprecated header のみ互換維持
 必須 CSV:
 - runs.csv
 - materials.csv
@@ -103,6 +126,12 @@ MVP では CSV を必須とし、JSONL は任意だが推奨。
 ## 6. 再現性のための保存項目
 - provider name
 - model name
+- temperature
+- top_p
+- candidate_count
+- Document Skill extraction model
+- Document Skill prompt_version
+- Document Skill context budget
 - temperature / top_p
 - prompt_version
 - cycle_count（=3）

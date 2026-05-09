@@ -3,6 +3,8 @@
 本ドキュメントは、研究フロー（Pre → Cycle1..3 → Post）と A/B/C 条件を実装するためのシステム構成を定義する。
 研究仕様の正本は `docs/07_adaptive_learning_design.md` とし、本書は実装視点で要点をまとめる。
 
+> 2026-05 update: 新規 runtime answer-generation path は embedding / vector retrieval を使わず、ingestion 時に抽出した **Document Skill entries** を参照する。pgvector と RAG テーブルは legacy として保持する。
+
 ## 1. 採用アーキテクチャ
 ### Monorepo
 - `apps/frontend`（Next.js）
@@ -20,6 +22,11 @@
 - OpenAPI により研究用 UI/API の仕様が明確
 - Pydantic により JSON スキーマを固定しやすい
 
+### DB: PostgreSQL + pgvector
+理由:
+- 通常のリレーショナルデータとベクトル検索を同居できる
+- ログ、実験データ、candidate、skill revision を一元管理できる
+- 新規 Document Skill tables と legacy vector tables を同一 DB で管理できる
 ### DB: PostgreSQL（+ pgvector は維持）
 - 実験 run、教材、テスト、所要時間、推定値、Skills 履歴を一元管理する
 - 本研究では RAG を主題にしないが、インフラ制約として pgvector を残しても運用可能にする（RAG 未使用でも起動可能）
@@ -29,6 +36,8 @@
 - ログ/実験 run の確認 UI を作りやすい
 
 ### Worker
+理由:
+- Preference Skill 更新、Document Skill extraction などを API リクエストから分離できる
 - Skills 更新や理解度推定を API リクエストから切り離す（将来の再実行・再計算が容易）
 - 研究段階では同期実行でもよいが、非同期ジョブに分離できる構成を維持する
 
@@ -55,6 +64,33 @@
 - 研究ログ確認（最低限：run 一覧と詳細）
 
 ### backend
+- REST API
+- session / conversation 管理
+- Document Skill context 構築
+- skill 読み出し
+- LLM candidate generation
+- 選択結果保存
+- CSV export
+
+### worker
+- document ingestion
+- Document Skill extraction
+- Document Skill revision / entries 保存
+- skill updater
+- 非同期ジョブ管理
+
+### db
+- 学習資料
+- Document Skill revision / entries
+- embeddings
+- users
+- conversations
+- turns
+- candidates
+- feedback
+- skills
+- skill revisions
+- experiment runs
 - 研究フロー API（run 開始/終了、教材提示、テスト開始/提出、採点、推定）
 - チャット API（教材閲覧中のみ許可）
 - Skills ON/OFF の厳密な差分を担保（A は参照/更新/反映、B はしない）
