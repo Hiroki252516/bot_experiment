@@ -1,7 +1,7 @@
 """study flow tables (runs/materials/assessments)
 
 Revision ID: 0003_study_flow
-Revises: 0002_auth_sessions
+Revises: 0003_document_skills
 Create Date: 2026-05-09 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0003_study_flow"
-down_revision = "0002_auth_sessions"
+down_revision = "0003_document_skills"
 branch_labels = None
 depends_on = None
 
@@ -114,4 +114,3 @@ def downgrade() -> None:
     op.drop_index("ix_study_materials_run_cycle", table_name="study_materials")
     op.drop_table("study_materials")
     op.drop_table("study_runs")
-

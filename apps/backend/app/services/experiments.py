@@ -14,8 +14,10 @@ from app.models.entities import (
     AnswerGenerationRun,
     AnswerSelection,
     ChatMessage,
+    DocumentSkillEntry,
+    DocumentSkillRevision,
+    DocumentSkillUsageLog,
     ExperimentRun,
-    RetrievalLog,
     SkillRevision,
 )
 
@@ -53,8 +55,14 @@ def export_logs_zip(session: Session) -> Path:
         for row in session.scalars(select(AnswerGenerationRun))
     }
     candidates = list(session.scalars(select(AnswerCandidate).order_by(AnswerCandidate.created_at.asc())))
-    retrievals = list(session.scalars(select(RetrievalLog).order_by(RetrievalLog.created_at.asc())))
     revisions = list(session.scalars(select(SkillRevision).order_by(SkillRevision.created_at.asc())))
+    document_skill_revisions = list(
+        session.scalars(select(DocumentSkillRevision).order_by(DocumentSkillRevision.created_at.asc()))
+    )
+    document_skill_entries = list(session.scalars(select(DocumentSkillEntry).order_by(DocumentSkillEntry.created_at.asc())))
+    document_skill_usage_logs = list(
+        session.scalars(select(DocumentSkillUsageLog).order_by(DocumentSkillUsageLog.created_at.asc()))
+    )
 
     csv_payloads: dict[str, str] = {}
 
@@ -155,25 +163,113 @@ def export_logs_zip(session: Session) -> Path:
     retrievals_buffer = io.StringIO()
     writer = csv.DictWriter(
         retrievals_buffer,
-        fieldnames=["retrieval_id", "chat_message_id", "chunk_id", "score", "rank", "embedding_model", "created_at"],
+        fieldnames=["deprecated_note"],
     )
     writer.writeheader()
-    for retrieval in retrievals:
+    writer.writerow(
+        {
+            "deprecated_note": "runtime RAG retrieval is deprecated; use document_skill_usage_logs.csv",
+        }
+    )
+    csv_payloads["retrievals.csv"] = retrievals_buffer.getvalue()
+
+    document_revisions_buffer = io.StringIO()
+    writer = csv.DictWriter(
+        document_revisions_buffer,
+        fieldnames=[
+            "revision_id",
+            "document_skill_id",
+            "revision_number",
+            "summary",
+            "extraction_model_name",
+            "prompt_version",
+            "source_digest",
+            "update_reason",
+            "created_at",
+        ],
+    )
+    writer.writeheader()
+    for revision in document_skill_revisions:
         writer.writerow(
             {
-                "retrieval_id": retrieval.id,
-                "chat_message_id": retrieval.chat_message_id,
-                "chunk_id": retrieval.chunk_id,
-                "score": retrieval.score,
-                "rank": retrieval.rank,
-                "embedding_model": retrieval.embedding_model,
-                "created_at": retrieval.created_at.isoformat(),
+                "revision_id": revision.id,
+                "document_skill_id": revision.document_skill_id,
+                "revision_number": revision.revision_number,
+                "summary": revision.summary,
+                "extraction_model_name": revision.extraction_model_name,
+                "prompt_version": revision.prompt_version,
+                "source_digest": revision.source_digest or "",
+                "update_reason": revision.update_reason,
+                "created_at": revision.created_at.isoformat(),
             }
         )
-    csv_payloads["retrievals.csv"] = retrievals_buffer.getvalue()
+    csv_payloads["document_skill_revisions.csv"] = document_revisions_buffer.getvalue()
+
+    document_entries_buffer = io.StringIO()
+    writer = csv.DictWriter(
+        document_entries_buffer,
+        fieldnames=[
+            "entry_id",
+            "document_skill_revision_id",
+            "entry_type",
+            "title",
+            "content",
+            "source_page",
+            "source_span",
+            "confidence",
+            "created_at",
+        ],
+    )
+    writer.writeheader()
+    for entry in document_skill_entries:
+        writer.writerow(
+            {
+                "entry_id": entry.id,
+                "document_skill_revision_id": entry.document_skill_revision_id,
+                "entry_type": entry.entry_type,
+                "title": entry.title,
+                "content": entry.content,
+                "source_page": entry.source_page if entry.source_page is not None else "",
+                "source_span": entry.source_span or "",
+                "confidence": entry.confidence,
+                "created_at": entry.created_at.isoformat(),
+            }
+        )
+    csv_payloads["document_skill_entries.csv"] = document_entries_buffer.getvalue()
+
+    usage_buffer = io.StringIO()
+    writer = csv.DictWriter(
+        usage_buffer,
+        fieldnames=[
+            "usage_log_id",
+            "chat_message_id",
+            "document_id",
+            "document_skill_revision_id",
+            "document_skill_entry_id",
+            "included_order",
+            "context_kind",
+            "context_hash",
+            "created_at",
+        ],
+    )
+    writer.writeheader()
+    for usage in document_skill_usage_logs:
+        writer.writerow(
+            {
+                "usage_log_id": usage.id,
+                "chat_message_id": usage.chat_message_id,
+                "document_id": usage.document_id,
+                "document_skill_revision_id": usage.document_skill_revision_id,
+                "document_skill_entry_id": usage.document_skill_entry_id or "",
+                "included_order": usage.included_order,
+                "context_kind": usage.context_kind,
+                "context_hash": usage.context_hash,
+                "created_at": usage.created_at.isoformat(),
+            }
+        )
+    csv_payloads["document_skill_usage_logs.csv"] = usage_buffer.getvalue()
 
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as archive:
         for filename, payload in csv_payloads.items():
             archive.writestr(filename, payload)
     return output_path
-

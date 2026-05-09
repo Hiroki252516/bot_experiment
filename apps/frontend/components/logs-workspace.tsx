@@ -25,6 +25,19 @@ type SessionLog = {
       comment: string | null;
     } | null;
     retrievals: Array<{ chunk_id: string; document_id: string; filename: string; chunk_index: number; score: number; text: string }>;
+    document_skill_contexts: Array<{
+      document_id: string;
+      filename: string;
+      document_skill_revision_id: string;
+      entries: Array<{
+        entry_id: string;
+        entry_type: string;
+        title: string;
+        content: string;
+        source_page: number | null;
+        included_order: number;
+      }>;
+    }>;
     created_at: string;
   }>;
 };
@@ -51,7 +64,7 @@ export function LogsWorkspace() {
       <section className="card stack">
         <div>
           <p className="muted">会話ログ確認</p>
-          <h1>セッション、回答候補、検索結果、評価を確認</h1>
+          <h1>セッション、回答候補、Document Skill 参照、評価を確認</h1>
         </div>
         <form className="grid-2" onSubmit={handleLoad}>
           <label className="field">
@@ -112,18 +125,25 @@ export function LogsWorkspace() {
                   )}
                 </div>
                 <div className="card" style={{ padding: 14 }}>
-                  <strong>検索結果</strong>
-                  {message.retrievals.length ? (
-                    message.retrievals.map((retrieval) => (
-                      <div key={retrieval.chunk_id}>
-                        <p className="muted">
-                          {retrieval.filename} / chunk {retrieval.chunk_index} / {retrieval.score.toFixed(4)}
-                        </p>
-                        <p>{retrieval.text}</p>
+                  <strong>参照された Document Skill entries</strong>
+                  {message.document_skill_contexts.length ? (
+                    message.document_skill_contexts.map((context) => (
+                      <div key={context.document_skill_revision_id}>
+                        <p className="muted">{context.filename}</p>
+                        {context.entries.map((entry) => (
+                          <div key={entry.entry_id}>
+                            <span className="tag">{entry.entry_type}</span>
+                            <strong>{entry.title}</strong>
+                            <p>{entry.content}</p>
+                            <p className="muted">
+                              {entry.source_page ? `p.${entry.source_page}` : "ページ情報なし"} / order {entry.included_order}
+                            </p>
+                          </div>
+                        ))}
                       </div>
                     ))
                   ) : (
-                    <p className="muted">検索ログは保存されていません。</p>
+                    <p className="muted">Document Skill usage logs は保存されていません。</p>
                   )}
                 </div>
               </div>

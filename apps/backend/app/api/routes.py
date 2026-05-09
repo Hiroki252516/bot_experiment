@@ -28,6 +28,11 @@ from app.schemas.chat import (
 )
 from app.schemas.common import HealthResponse
 from app.schemas.document import DocumentChunkResponse, DocumentDeleteResponse, DocumentResponse, IngestJobResponse
+from app.schemas.document_skill import (
+    DocumentSkillEntryResponse,
+    DocumentSkillResponse,
+    DocumentSkillRevisionResponse,
+)
 from app.schemas.study import (
     AssessmentStartRequest,
     AssessmentStartResponse,
@@ -63,7 +68,16 @@ from app.services.auth import (
     logout_session,
     register_user,
 )
-from app.services.documents import create_document, create_ingestion_job, delete_document, list_chunks, list_documents
+from app.services.documents import (
+    create_document,
+    create_ingestion_job,
+    delete_document,
+    get_document_skill,
+    list_chunks,
+    list_document_skill_entries,
+    list_document_skill_revisions,
+    list_documents,
+)
 from app.services.experiments import create_experiment_run, export_logs_zip, list_experiment_runs
 from app.services.study import (
     chat_ask,
@@ -334,14 +348,7 @@ def get_user_skills_route(user_id: str, session: Session = Depends(get_session))
 @router.post("/api/documents/upload", response_model=DocumentResponse)
 def upload_document_route(file: UploadFile = File(...), session: Session = Depends(get_session)) -> DocumentResponse:
     document = create_document(session, file)
-    return DocumentResponse(
-        document_id=document.id,
-        filename=document.filename,
-        mime_type=document.mime_type,
-        source_type=document.source_type,
-        ingest_status=document.ingest_status,
-        created_at=document.created_at,
-    )
+    return _document_response(session, document)
 
 
 @router.post("/api/documents/{document_id}/ingest", response_model=IngestJobResponse)
@@ -352,17 +359,7 @@ def ingest_document_route(document_id: str, session: Session = Depends(get_sessi
 
 @router.get("/api/documents", response_model=list[DocumentResponse])
 def list_documents_route(session: Session = Depends(get_session)) -> list[DocumentResponse]:
-    return [
-        DocumentResponse(
-            document_id=document.id,
-            filename=document.filename,
-            mime_type=document.mime_type,
-            source_type=document.source_type,
-            ingest_status=document.ingest_status,
-            created_at=document.created_at,
-        )
-        for document in list_documents(session)
-    ]
+    return [_document_response(session, document) for document in list_documents(session)]
 
 
 @router.get("/api/documents/{document_id}/chunks", response_model=list[DocumentChunkResponse])
@@ -376,6 +373,76 @@ def list_document_chunks_route(document_id: str, session: Session = Depends(get_
             has_embedding=has_embedding,
         )
         for chunk, has_embedding in list_chunks(session, document_id)
+    ]
+
+
+@router.get("/api/documents/{document_id}/skill", response_model=DocumentSkillResponse)
+def get_document_skill_route(document_id: str, session: Session = Depends(get_session)) -> DocumentSkillResponse:
+    try:
+        document, document_skill, revision = get_document_skill(session, document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    entries_count = len(list_document_skill_entries(session, document_id)) if revision else 0
+    return DocumentSkillResponse(
+        document_id=document.id,
+        filename=document.filename,
+        document_skill_id=document_skill.id if document_skill else None,
+        active_revision_id=revision.id if revision else None,
+        status=document_skill.status if document_skill else None,
+        revision_number=revision.revision_number if revision else None,
+        profile_json=revision.profile_json if revision else None,
+        entries_count=entries_count,
+        updated_at=document_skill.updated_at if document_skill else None,
+    )
+
+
+@router.get("/api/documents/{document_id}/skill/revisions", response_model=list[DocumentSkillRevisionResponse])
+def list_document_skill_revisions_route(
+    document_id: str,
+    session: Session = Depends(get_session),
+) -> list[DocumentSkillRevisionResponse]:
+    try:
+        revisions = list_document_skill_revisions(session, document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [
+        DocumentSkillRevisionResponse(
+            revision_id=revision.id,
+            revision_number=revision.revision_number,
+            summary=revision.summary,
+            extraction_model_name=revision.extraction_model_name,
+            prompt_version=revision.prompt_version,
+            source_digest=revision.source_digest,
+            update_reason=revision.update_reason,
+            created_at=revision.created_at,
+        )
+        for revision in revisions
+    ]
+
+
+@router.get("/api/documents/{document_id}/skill/entries", response_model=list[DocumentSkillEntryResponse])
+def list_document_skill_entries_route(
+    document_id: str,
+    session: Session = Depends(get_session),
+) -> list[DocumentSkillEntryResponse]:
+    try:
+        entries = list_document_skill_entries(session, document_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [
+        DocumentSkillEntryResponse(
+            entry_id=entry.id,
+            revision_id=entry.document_skill_revision_id,
+            entry_type=entry.entry_type,
+            title=entry.title,
+            content=entry.content,
+            source_page=entry.source_page,
+            source_span=entry.source_span,
+            confidence=entry.confidence,
+            metadata=entry.metadata_json,
+            created_at=entry.created_at,
+        )
+        for entry in entries
     ]
 
 
@@ -422,6 +489,7 @@ def generate_chat_route(
             }
             for row in result["retrievals"]
         ],
+        document_skill_contexts=result["document_skill_contexts"],
         candidates=[
             {
                 "candidate_id": candidate.id,
@@ -608,3 +676,26 @@ def get_experiment_run_route(run_id: str, session: Session = Depends(get_session
 def export_logs_route(session: Session = Depends(get_session)):
     path = export_logs_zip(session)
     return FileResponse(path, media_type="application/zip", filename="logs_export.zip")
+
+
+def _document_response(session: Session, document) -> DocumentResponse:
+    try:
+        _document, document_skill, revision = get_document_skill(session, document.id)
+        entries_count = len(list_document_skill_entries(session, document.id)) if revision else 0
+    except ValueError:
+        document_skill = None
+        revision = None
+        entries_count = 0
+    return DocumentResponse(
+        document_id=document.id,
+        filename=document.filename,
+        mime_type=document.mime_type,
+        source_type=document.source_type,
+        ingest_status=document.ingest_status,
+        created_at=document.created_at,
+        document_skill_status=document_skill.status if document_skill else None,
+        active_document_skill_revision_id=revision.id if revision else None,
+        document_skill_revision_number=revision.revision_number if revision else None,
+        document_skill_entries_count=entries_count,
+        document_skill_updated_at=document_skill.updated_at if document_skill else None,
+    )
