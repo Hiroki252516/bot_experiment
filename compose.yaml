@@ -55,6 +55,19 @@ services:
       - model_cache:/app/model_cache
       - ./seeds:/app/seeds:ro
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tutorbot-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   frontend:
     build:
       context: .
@@ -72,3 +85,4 @@ volumes:
   uploaded_documents:
   export_artifacts:
   model_cache:
+  ollama_data:

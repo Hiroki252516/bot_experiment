@@ -37,7 +37,7 @@ export function AuthNav() {
 
   return (
     <nav className="top-nav">
-      <Link href="/">チャット</Link>
+      <Link href="/">学習</Link>
       <Link href="/logs">会話ログ</Link>
       <Link href="/admin">管理</Link>
       {loaded && user ? (

@@ -59,6 +59,26 @@ class GenerationProvider(ABC):
     ) -> tuple[DocumentSkillDelta, ProviderMetadata]:
         raise NotImplementedError
 
+<<<<<<< HEAD
+=======
+    def generate_material(
+        self,
+        cycle_index: int,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        raise NotImplementedError
+
+    def answer_question(
+        self,
+        material_text: str,
+        question_text: str,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        raise NotImplementedError
+
+>>>>>>> main
 
 class MockGenerationProvider(GenerationProvider):
     provider_name = "mock"
@@ -213,6 +233,65 @@ class MockGenerationProvider(GenerationProvider):
                 top_p=self.settings.generation_top_p,
                 prompt_version=self.settings.prompt_version,
                 raw_response={"mode": "mock"},
+            ),
+        )
+
+    def generate_material(
+        self,
+        cycle_index: int,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        notes = ", ".join(skill_profile.get("notes", [])) if skills_enabled else "skills disabled"
+        content_text = (
+            f"# 教材（Cycle {cycle_index}）\n\n"
+            "この教材は学習サイクルのためのサンプルテキストです。\n\n"
+            f"- スキル反映: {notes}\n\n"
+            "## 要点\n\n"
+            "1. 重要な概念を短く定義する\n"
+            "2. 具体例を1つ示す\n"
+            "3. よくある間違いを1つ示す\n"
+        )
+        return (
+            {
+                "title": f"教材 {cycle_index}",
+                "difficulty": "medium",
+                "learning_objectives": ["理解度チェック"],
+                "content_text": content_text,
+            },
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name="mock-model",
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response={"mode": "mock-material"},
+            ),
+        )
+
+    def answer_question(
+        self,
+        material_text: str,
+        question_text: str,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        notes = ", ".join(skill_profile.get("notes", [])) if skills_enabled else "skills disabled"
+        answer_text = (
+            "教材の要点に沿って説明します。\n\n"
+            f"- 質問: {question_text}\n"
+            f"- スキル反映: {notes}\n\n"
+            "不明点があれば、教材のどの段落かを指定して追加で質問してください。"
+        )
+        return (
+            {"answer_text": answer_text},
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name="mock-model",
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response={"mode": "mock-answer"},
             ),
         )
 
@@ -375,6 +454,76 @@ class GeminiGenerationProvider(GenerationProvider):
             ),
         )
 
+<<<<<<< HEAD
+=======
+    def generate_material(
+        self,
+        cycle_index: int,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING"},
+                "difficulty": {"type": "STRING"},
+                "learning_objectives": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "content_text": {"type": "STRING"},
+            },
+            "required": ["title", "difficulty", "learning_objectives", "content_text"],
+        }
+        prompt = (
+            "あなたは学習支援システムの教材（テキスト）を生成するAIです。\n"
+            "必ず日本語で、学習者向けに分かりやすく書いてください。\n"
+            "出力は必ず JSON で、指定スキーマに従ってください。\n"
+            f"サイクル: {cycle_index}\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.gemini_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+    def answer_question(
+        self,
+        material_text: str,
+        question_text: str,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = {"type": "OBJECT", "properties": {"answer_text": {"type": "STRING"}}, "required": ["answer_text"]}
+        prompt = (
+            "あなたは教材の読解支援チャットボットです。\n"
+            "必ず日本語で回答し、教材の範囲に寄せて説明してください。\n"
+            "出力は必ず JSON で、指定スキーマに従ってください。\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"教材本文:\n{material_text}\n\n"
+            f"学習者の質問: {question_text}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.gemini_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+>>>>>>> main
 
 class OllamaGenerationProvider(GenerationProvider):
     provider_name = "ollama"
@@ -566,6 +715,74 @@ class OllamaGenerationProvider(GenerationProvider):
             ),
         )
 
+<<<<<<< HEAD
+=======
+    def generate_material(
+        self,
+        cycle_index: int,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "difficulty": {"type": "string"},
+                "learning_objectives": {"type": "array", "items": {"type": "string"}},
+                "content_text": {"type": "string"},
+            },
+            "required": ["title", "difficulty", "learning_objectives", "content_text"],
+        }
+        prompt = (
+            "あなたは学習支援システムの教材（テキスト）を生成するAIです。必ず日本語で回答してください。\n"
+            "出力は必ず JSON で、指定スキーマに従ってください。\n"
+            f"サイクル: {cycle_index}\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.ollama_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+    def answer_question(
+        self,
+        material_text: str,
+        question_text: str,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = {"type": "object", "properties": {"answer_text": {"type": "string"}}, "required": ["answer_text"]}
+        prompt = (
+            "あなたは教材の読解支援チャットボットです。必ず日本語で回答し、教材の範囲に寄せて説明してください。\n"
+            "出力は必ず JSON で、指定スキーマに従ってください。\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"教材本文:\n{material_text}\n\n"
+            f"学習者の質問: {question_text}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.ollama_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+>>>>>>> main
 
 def _document_skill_prompt(document_metadata: dict, source_unit: dict, previous_document_skill: dict) -> str:
     return (
