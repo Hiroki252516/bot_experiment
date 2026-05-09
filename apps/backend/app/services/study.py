@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.llm.providers import get_generation_provider
 from app.models.entities import (
+    DocumentSkill,
+    RagDocument,
     StudyAssessment,
     StudyAssessmentAttempt,
     StudyChatTurn,
@@ -19,6 +21,7 @@ from app.models.entities import (
     User,
     utcnow,
 )
+from app.services.document_skills import build_document_skill_context
 
 
 def _require_run(session: Session, run_id: str) -> StudyRun:
@@ -88,17 +91,22 @@ def get_or_create_material(session: Session, run: StudyRun, cycle_index: int) ->
         difficulty = None
         metadata = {"fixed_material_version": 1}
     else:
-        # MVP: generate a simple material using the existing candidate generator as a fallback.
+        document_skill_context = _require_study_document_skill_context(session)
         provider = get_generation_provider(get_settings())
         generated, meta = provider.generate_material(
             cycle_index=cycle_index,
             skill_profile={},
             skills_enabled=run.skills_enabled,
+            document_skill_context=document_skill_context,
         )
         content_text = generated["content_text"]
         source_type = "generated"
         difficulty = generated.get("difficulty")
-        metadata = {"provider": meta.provider_name, "model": meta.model_name}
+        metadata = {
+            "provider": meta.provider_name,
+            "model": meta.model_name,
+            "document_skill_context": document_skill_context,
+        }
 
     material = StudyMaterial(
         run_id=run.id,
@@ -147,12 +155,17 @@ def confirm_material_read(
 def start_assessment(session: Session, run_id: str, assessment_type: str, cycle_index: int | None) -> StudyAssessmentAttempt:
     run = _require_run(session, run_id)
     cycle_index = _ensure_assessment_cycle(assessment_type, cycle_index)
+    content_json = (
+        _default_assessment_content(assessment_type, cycle_index)
+        if run.group == "C"
+        else _generate_assessment_content(session, run, assessment_type, cycle_index)
+    )
 
     assessment = StudyAssessment(
         run_id=run.id,
         assessment_type=assessment_type,
         cycle_index=cycle_index,
-        content_json=_default_assessment_content(assessment_type, cycle_index),
+        content_json=content_json,
         created_at=utcnow(),
     )
     session.add(assessment)
@@ -255,11 +268,13 @@ def chat_ask(session: Session, run_id: str, material_id: str, question_text: str
         raise HTTPException(status_code=409, detail="Chat is only allowed while material is being read")
 
     provider = get_generation_provider(get_settings())
+    document_skill_context = _require_study_document_skill_context(session)
     answer, _meta = provider.answer_question(
         material_text=material.content_text,
         question_text=question_text,
         skill_profile={},
         skills_enabled=run.skills_enabled,
+        document_skill_context=document_skill_context,
     )
     turn = StudyChatTurn(
         run_id=run.id,
@@ -272,6 +287,78 @@ def chat_ask(session: Session, run_id: str, material_id: str, question_text: str
     session.add(turn)
     session.commit()
     return turn
+
+
+def _require_study_document_skill_context(session: Session) -> dict:
+    completed_upload_ids = list(
+        session.scalars(
+            select(DocumentSkill.document_id)
+            .join(RagDocument, RagDocument.id == DocumentSkill.document_id)
+            .where(DocumentSkill.status == "completed")
+            .where(RagDocument.ingest_status == "completed")
+            .where(RagDocument.source_type != "seed")
+            .order_by(RagDocument.created_at.desc())
+        )
+    )
+    context, _usage_items = build_document_skill_context(
+        session,
+        document_ids=completed_upload_ids or None,
+        enabled=True,
+    )
+    if not context.get("documents"):
+        raise HTTPException(
+            status_code=409,
+            detail="アップロード教材のingestまたはDocument Skill抽出が未完了です。教材アップロード後にingest完了を確認してください。",
+        )
+    return context
+
+
+def _generate_assessment_content(
+    session: Session,
+    run: StudyRun,
+    assessment_type: str,
+    cycle_index: int | None,
+) -> dict:
+    document_skill_context = _require_study_document_skill_context(session)
+    material_text: str | None = None
+    if assessment_type == "mini_test" and cycle_index is not None:
+        material = session.execute(
+            select(StudyMaterial).where(StudyMaterial.run_id == run.id, StudyMaterial.cycle_index == cycle_index)
+        ).scalars().first()
+        material_text = material.content_text if material else None
+    provider = get_generation_provider(get_settings())
+    assessment, _meta = provider.generate_assessment(
+        assessment_type=assessment_type,
+        cycle_index=cycle_index,
+        material_text=material_text,
+        document_skill_context=document_skill_context,
+        skill_profile={},
+        skills_enabled=run.skills_enabled,
+    )
+    return _normalize_assessment_content(assessment, assessment_type, cycle_index)
+
+
+def _normalize_assessment_content(assessment: dict, assessment_type: str, cycle_index: int | None) -> dict:
+    questions = []
+    prefix = "Pre" if assessment_type == "pre_test" else "Post" if assessment_type == "post_test" else f"Mini{cycle_index}"
+    for index, question in enumerate(assessment.get("questions", []), start=1):
+        choices = [str(choice) for choice in question.get("choices", [])][:4]
+        while len(choices) < 4:
+            choices.append(f"選択肢{len(choices) + 1}")
+        correct_choice_index = int(question.get("correct_choice_index", 0))
+        if correct_choice_index < 0 or correct_choice_index >= len(choices):
+            correct_choice_index = 0
+        questions.append(
+            {
+                "question_id": str(question.get("question_id") or f"{prefix}_q{index}"),
+                "stem": str(question.get("stem") or "教材内容に基づいて正しい選択肢を選んでください。"),
+                "choices": choices,
+                "correct_choice_index": correct_choice_index,
+            }
+        )
+    if not questions:
+        return _default_assessment_content(assessment_type, cycle_index)
+    return {"questions": questions}
 
 
 def _default_assessment_content(assessment_type: str, cycle_index: int | None) -> dict:

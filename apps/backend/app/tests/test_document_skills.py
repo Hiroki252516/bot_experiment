@@ -122,3 +122,51 @@ def test_export_includes_document_skill_csvs(client, session) -> None:
         assert "document_skill_usage_logs.csv" in names
         assert "retrievals.csv" in names
         assert "deprecated" in archive.read("retrievals.csv").decode()
+
+
+def test_study_material_and_assessment_use_uploaded_document_skill(client, session) -> None:
+    user_id, _document_id = _register_and_ingest_document(client, session)
+    run_response = client.post("/api/runs/start", json={"user_id": user_id, "group": "A", "cycle_count": 3})
+    assert run_response.status_code == 200
+    run_id = run_response.json()["run_id"]
+
+    material_response = client.post("/api/materials/next", json={"run_id": run_id, "cycle_index": 1})
+    assert material_response.status_code == 200
+    material_payload = material_response.json()
+    assert "HTML" in material_payload["content_text"]
+
+    pre_response = client.post(
+        "/api/assessments/start",
+        json={"run_id": run_id, "assessment_type": "pre_test", "cycle_index": None},
+    )
+    assert pre_response.status_code == 200
+    pre_questions = pre_response.json()["content_json"]["questions"]
+    assert pre_questions
+    assert any("HTML" in choice for question in pre_questions for choice in question["choices"])
+
+    mini_response = client.post(
+        "/api/assessments/start",
+        json={"run_id": run_id, "assessment_type": "mini_test", "cycle_index": 1},
+    )
+    assert mini_response.status_code == 200
+    mini_questions = mini_response.json()["content_json"]["questions"]
+    assert mini_questions
+    assert all(len(question["choices"]) == 4 for question in mini_questions)
+
+
+def test_study_material_requires_completed_document_skill_context(client) -> None:
+    register_response = client.post(
+        "/api/auth/register",
+        json={"username": "study-no-doc", "password": "password123", "display_name": "No Doc"},
+    )
+    assert register_response.status_code == 200
+    user_id = register_response.json()["user_id"]
+    run_response = client.post("/api/runs/start", json={"user_id": user_id, "group": "A", "cycle_count": 3})
+    assert run_response.status_code == 200
+
+    material_response = client.post(
+        "/api/materials/next",
+        json={"run_id": run_response.json()["run_id"], "cycle_index": 1},
+    )
+    assert material_response.status_code == 409
+    assert "Document Skill" in material_response.text
