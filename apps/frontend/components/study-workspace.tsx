@@ -5,589 +5,340 @@ import Link from "next/link";
 
 import { apiFetch } from "../lib/api";
 
-type AuthUserResponse = {
-  user_id: string;
-  username: string;
-  display_name: string | null;
-  active_skill_revision_id: string | null;
-};
-
-type GroupName = "A" | "B" | "C";
-type AssessmentType = "pre_test" | "mini_test" | "post_test";
-
-type RunStartResponse = {
-  run_id: string;
-  user_id: string;
-  group: GroupName;
-  skills_enabled: boolean;
-  cycle_count: number;
-  created_at: string;
-};
-
-type MaterialResponse = {
-  material_id: string;
-  run_id: string;
-  cycle_index: number;
-  group: GroupName;
-  source_type: "generated" | "fixed";
-  content_text: string;
-  difficulty: string | null;
-  created_at: string;
-};
-
-type McqQuestion = {
+type AuthUser = { user_id: string; username: string; display_name: string | null };
+type SourceDocument = { document_id: string; title: string; filename: string; status: string };
+type RunState = { run_id: string; state: string; cycle_count: number; current_cycle_index: number; next_action: string };
+type RunStart = { run_id: string; state: string; cycle_count: number };
+type Question = {
   question_id: string;
+  topic: string;
+  difficulty: string;
   stem: string;
   choices: string[];
-  correct_choice_index: number;
+  correct_answer: string;
 };
-
-type AssessmentStartResponse = {
-  assessment_attempt_id: string;
-  assessment_id: string;
-  assessment_type: AssessmentType;
-  cycle_index: number | null;
-  started_at: string;
-  content_json: { questions: McqQuestion[] };
-};
-
-type AssessmentSubmitResponse = {
-  assessment_attempt_id: string;
-  submitted_at: string;
-  duration_seconds: number;
-  score: number;
-  max_score: number;
-  per_question_correct: Array<{ question_id: string; is_correct: boolean }>;
-};
-
-type MasteryEstimateResponse = {
-  mastery_estimate_id: string;
-  run_id: string;
+type Assessment = { assessment_id: string; title: string; questions: Question[] };
+type Material = {
+  material_id: string;
   cycle_index: number;
-  estimate_json: {
-    mastery_estimate: number;
-    confidence: number;
-    evidence_summary: string;
-    next_difficulty_recommendation: "easy" | "medium" | "hard";
+  title: string;
+  content_markdown: string;
+  focus_topics: string[];
+  created_at: string;
+};
+type Result = {
+  initial_score: number;
+  final_score: number;
+  gain_score: number;
+  initial_accuracy: number;
+  final_accuracy: number;
+  accuracy_gain: number;
+  cycle_score_trend: Array<{ cycle_index: number; score: number; max_score: number }>;
+  improved_topics: string[];
+  remaining_weak_topics: string[];
+  ai_summary: string;
+};
+
+function stateLabel(state: string) {
+  const labels: Record<string, string> = {
+    RUN_STARTED: "初回テスト生成待ち",
+    INITIAL_TEST_GENERATED: "初回テスト回答中",
+    INITIAL_TEST_SUBMITTED: "Cycle 教材生成待ち",
+    CYCLE_MATERIAL_GENERATED: "教材閲覧中",
+    CYCLE_MATERIAL_READ: "Cycle テスト生成待ち",
+    CYCLE_TEST_GENERATED: "Cycle テスト回答中",
+    CYCLE_TEST_SUBMITTED: "次 Cycle または最終テスト待ち",
+    FINAL_TEST_GENERATED: "最終テスト回答中",
+    RESULT_READY: "結果表示可能",
   };
-  created_at: string;
-};
-
-type ChatAskResponse = {
-  chat_turn_id: string;
-  answer_text: string;
-  created_at: string;
-};
-
-type Step =
-  | { kind: "idle" }
-  | { kind: "pre_test" }
-  | { kind: "material"; cycle_index: number }
-  | { kind: "mini_test"; cycle_index: number }
-  | { kind: "post_test" }
-  | { kind: "finished" };
-
-function formatSeconds(seconds: number | null | undefined) {
-  if (seconds == null) return "-";
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return minutes ? `${minutes}分${remainder}秒` : `${remainder}秒`;
+  return labels[state] ?? state;
 }
 
 export function StudyWorkspace() {
-  const [authUser, setAuthUser] = useState<AuthUserResponse | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-
-  const [group, setGroup] = useState<GroupName>("A");
-  const [cycleCount] = useState(3);
-
-  const [run, setRun] = useState<RunStartResponse | null>(null);
-  const [step, setStep] = useState<Step>({ kind: "idle" });
-
-  const [material, setMaterial] = useState<MaterialResponse | null>(null);
-  const [materialPresentedAt, setMaterialPresentedAt] = useState<Date | null>(null);
-  const [materialReadConfirmedAt, setMaterialReadConfirmedAt] = useState<Date | null>(null);
-  const [materialReadDurationSeconds, setMaterialReadDurationSeconds] = useState<number | null>(null);
-
-  const [assessment, setAssessment] = useState<AssessmentStartResponse | null>(null);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
-  const [submitted, setSubmitted] = useState<AssessmentSubmitResponse | null>(null);
-
-  const [mastery, setMastery] = useState<MasteryEstimateResponse | null>(null);
-
-  const [chatQuestion, setChatQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<Array<{ q: string; a: string; at: string }>>([]);
-  const [chatStatus, setChatStatus] = useState("");
-
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [documentId, setDocumentId] = useState("");
+  const [run, setRun] = useState<RunStart | null>(null);
+  const [runState, setRunState] = useState<RunState | null>(null);
+  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [material, setMaterial] = useState<Material | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<Result | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
-  const canChat = useMemo(() => {
-    if (!run) return false;
-    if (run.group === "C") return false;
-    if (!material) return false;
-    if (step.kind !== "material") return false;
-    // backend guard: chat allowed only before read_confirm is saved
-    return materialReadConfirmedAt === null;
-  }, [run, material, step.kind, materialReadConfirmedAt]);
+  const currentCycle = runState?.current_cycle_index || 1;
+  const allAnswered = useMemo(() => {
+    const questions = assessment?.questions ?? [];
+    return questions.length > 0 && questions.every((question) => answers[question.question_id]);
+  }, [answers, assessment]);
 
   useEffect(() => {
-    async function loadAuth() {
+    async function boot() {
       try {
-        const currentUser = await apiFetch<AuthUserResponse>("/api/auth/me");
-        setAuthUser(currentUser);
-      } catch {
-        setAuthUser(null);
+        const [me, docs] = await Promise.all([
+          apiFetch<AuthUser>("/api/auth/me").catch(() => null),
+          apiFetch<SourceDocument[]>("/api/admin/documents").catch(() => []),
+        ]);
+        setAuthUser(me);
+        setDocuments(docs.filter((doc) => doc.status === "ready"));
+        setDocumentId(docs.find((doc) => doc.status === "ready")?.document_id ?? "");
       } finally {
         setAuthLoading(false);
       }
     }
-    loadAuth();
+    void boot();
   }, []);
+
+  async function refreshState(runId = run?.run_id) {
+    if (!runId) return null;
+    const state = await apiFetch<RunState>(`/api/runs/${runId}/state`);
+    setRunState(state);
+    return state;
+  }
 
   async function startRun(event: FormEvent) {
     event.preventDefault();
-    if (!authUser) {
-      setError("学習フローを開始するにはログインが必要です。");
-      return;
-    }
+    if (!authUser || !documentId) return;
     setError("");
     setStatus("run を開始しています...");
     try {
-      const created = await apiFetch<RunStartResponse>("/api/runs/start", {
+      const started = await apiFetch<RunStart>("/api/runs/start", {
         method: "POST",
-        body: JSON.stringify({ user_id: authUser.user_id, group, cycle_count: cycleCount }),
+        body: JSON.stringify({ user_id: authUser.user_id, document_id: documentId, cycle_count: 10 }),
       });
-      setRun(created);
-      setStep({ kind: "pre_test" });
-      setMaterial(null);
+      setRun(started);
       setAssessment(null);
+      setMaterial(null);
+      setResult(null);
       setAnswers({});
-      setSubmitted(null);
-      setMastery(null);
-      setChatHistory([]);
-      setMaterialPresentedAt(null);
-      setMaterialReadConfirmedAt(null);
-      setMaterialReadDurationSeconds(null);
-      setStatus("Pre-test を開始します。");
+      await refreshState(started.run_id);
+      setStatus("run を開始しました。初回テストを生成してください。");
     } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "run 開始に失敗しました。");
       setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "run の開始に失敗しました。");
     }
   }
 
-  async function startAssessment(assessmentType: AssessmentType, cycleIndex: number | null) {
+  async function generateInitial() {
     if (!run) return;
     setError("");
-    setStatus("テストを準備しています...");
-    setAssessment(null);
-    setSubmitted(null);
+    setStatus("初回テストを生成しています...");
+    await apiFetch(`/api/runs/${run.run_id}/initial-test/generate`, { method: "POST" });
+    const test = await apiFetch<Assessment>(`/api/runs/${run.run_id}/initial-test`);
+    setAssessment(test);
     setAnswers({});
-    try {
-      const started = await apiFetch<AssessmentStartResponse>("/api/assessments/start", {
-        method: "POST",
-        body: JSON.stringify({ run_id: run.run_id, assessment_type: assessmentType, cycle_index: cycleIndex }),
-      });
-      setAssessment(started);
-      setStatus("テストを開始しました。回答して送信してください（時間制限なし）。");
-    } catch (requestError) {
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "テスト開始に失敗しました。");
-    }
+    await refreshState();
+    setStatus("初回テストを生成しました。");
   }
 
-  async function submitAssessment() {
-    if (!assessment) return;
+  async function submitInitial() {
+    if (!run || !assessment) return;
     setError("");
-    setStatus("回答を送信して採点しています...");
-    try {
-      const payloadAnswers = Object.entries(answers).map(([question_id, choice_index]) => ({
-        question_id,
-        choice_index,
-      }));
-      const response = await apiFetch<AssessmentSubmitResponse>("/api/assessments/submit", {
-        method: "POST",
-        body: JSON.stringify({
-          assessment_attempt_id: assessment.assessment_attempt_id,
-          submitted_at: new Date().toISOString(),
-          answers: payloadAnswers,
-        }),
-      });
-      setSubmitted(response);
-      setStatus(`採点が完了しました（${response.score}/${response.max_score}）。`);
-    } catch (requestError) {
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "提出に失敗しました。");
-    }
+    setStatus("初回テストを提出しています...");
+    await apiFetch(`/api/runs/${run.run_id}/initial-test/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })) }),
+    });
+    setAssessment(null);
+    setAnswers({});
+    await refreshState();
+    setStatus("初回テストを提出しました。Cycle 1 教材へ進んでください。");
   }
 
-  async function loadNextMaterial(cycleIndex: number) {
-    if (!run) return;
+  async function generateMaterial() {
+    if (!run || !runState) return;
     setError("");
-    setStatus("教材を準備しています...");
-    setMaterial(null);
-    setMaterialPresentedAt(null);
-    setMaterialReadConfirmedAt(null);
-    setMaterialReadDurationSeconds(null);
-    setChatHistory([]);
-    try {
-      const response = await apiFetch<MaterialResponse>("/api/materials/next", {
-        method: "POST",
-        body: JSON.stringify({ run_id: run.run_id, cycle_index: cycleIndex }),
-      });
-      setMaterial(response);
-      setMaterialPresentedAt(new Date());
-      setStep({ kind: "material", cycle_index: cycleIndex });
-      setStatus("教材を読み、読了したら「読了」ボタンを押してください。");
-    } catch (requestError) {
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "教材取得に失敗しました。");
-    }
+    setStatus(`Cycle ${currentCycle} 教材を生成しています...`);
+    await apiFetch(`/api/runs/${run.run_id}/cycles/${currentCycle}/material/generate`, { method: "POST" });
+    const generated = await apiFetch<Material>(`/api/runs/${run.run_id}/cycles/${currentCycle}/material`);
+    setMaterial(generated);
+    await refreshState();
+    setStatus("教材を生成しました。読み終えたら読了を記録してください。");
   }
 
   async function confirmRead() {
-    if (!run || !material || !materialPresentedAt) return;
-    const readConfirmedAt = new Date();
-    setMaterialReadConfirmedAt(readConfirmedAt);
+    if (!run || !runState) return;
     setError("");
     setStatus("読了を記録しています...");
-    try {
-      const response = await apiFetch<{ material_read_id: string; duration_seconds: number }>("/api/materials/read_confirm", {
-        method: "POST",
-        body: JSON.stringify({
-          run_id: run.run_id,
-          material_id: material.material_id,
-          presented_at: materialPresentedAt.toISOString(),
-          read_confirmed_at: readConfirmedAt.toISOString(),
-        }),
-      });
-      setMaterialReadDurationSeconds(response.duration_seconds);
-      setStatus(`読了を記録しました（所要時間: ${formatSeconds(response.duration_seconds)}）。ミニテストを開始してください。`);
-      setStep({ kind: "mini_test", cycle_index: material.cycle_index });
-    } catch (requestError) {
-      setMaterialReadConfirmedAt(null);
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "読了記録に失敗しました。");
-    }
+    await apiFetch(`/api/runs/${run.run_id}/cycles/${currentCycle}/material/read-confirm`, { method: "POST" });
+    await refreshState();
+    setStatus("読了を記録しました。Cycle テストを生成してください。");
   }
 
-  async function handleChatAsk(event: FormEvent) {
-    event.preventDefault();
-    if (!run || !material) return;
-    if (!canChat) return;
-    const question = chatQuestion.trim();
-    if (!question) return;
-    setChatQuestion("");
-    setChatStatus("回答を生成しています...");
+  async function generateCycleTest() {
+    if (!run || !runState) return;
     setError("");
-    try {
-      const response = await apiFetch<ChatAskResponse>("/api/chat/ask", {
-        method: "POST",
-        body: JSON.stringify({ run_id: run.run_id, material_id: material.material_id, question_text: question }),
-      });
-      setChatHistory((current) => [...current, { q: question, a: response.answer_text, at: response.created_at }]);
-      setChatStatus("");
-    } catch (requestError) {
-      setChatStatus("");
-      setError(requestError instanceof Error ? requestError.message : "チャットに失敗しました。");
-    }
+    setStatus(`Cycle ${currentCycle} テストを生成しています...`);
+    await apiFetch(`/api/runs/${run.run_id}/cycles/${currentCycle}/test/generate`, { method: "POST" });
+    const test = await apiFetch<Assessment>(`/api/runs/${run.run_id}/cycles/${currentCycle}/test`);
+    setAssessment(test);
+    setAnswers({});
+    await refreshState();
+    setStatus("Cycle テストを生成しました。");
   }
 
-  async function estimateAndAdvance(cycleIndex: number) {
+  async function submitCycleTest() {
+    if (!run || !assessment || !runState) return;
+    setError("");
+    setStatus(`Cycle ${currentCycle} テストを提出しています...`);
+    await apiFetch(`/api/runs/${run.run_id}/cycles/${currentCycle}/test/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })) }),
+    });
+    setAssessment(null);
+    setMaterial(null);
+    setAnswers({});
+    await refreshState();
+    setStatus(currentCycle < 10 ? `Cycle ${currentCycle} を提出しました。次の教材へ進んでください。` : "Cycle 10 を提出しました。最終テストへ進んでください。");
+  }
+
+  async function generateFinal() {
     if (!run) return;
     setError("");
-    setStatus("理解度を推定しています...");
-    try {
-      const response = await apiFetch<MasteryEstimateResponse>("/api/mastery/estimate", {
-        method: "POST",
-        body: JSON.stringify({ run_id: run.run_id, cycle_index: cycleIndex }),
-      });
-      setMastery(response);
-      if (cycleIndex < run.cycle_count) {
-        setStatus(`理解度推定が完了しました（mastery=${response.estimate_json.mastery_estimate.toFixed(2)}）。次の教材へ進みます。`);
-        await loadNextMaterial(cycleIndex + 1);
-      } else {
-        setStatus(`理解度推定が完了しました（mastery=${response.estimate_json.mastery_estimate.toFixed(2)}）。最終テストへ進みます。`);
-        setStep({ kind: "post_test" });
-        setMaterial(null);
-        setAssessment(null);
-        setAnswers({});
-        setSubmitted(null);
-      }
-    } catch (requestError) {
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "理解度推定に失敗しました。");
-    }
+    setStatus("最終テストを生成しています...");
+    await apiFetch(`/api/runs/${run.run_id}/final-test/generate`, { method: "POST" });
+    const test = await apiFetch<Assessment>(`/api/runs/${run.run_id}/final-test`);
+    setAssessment(test);
+    setAnswers({});
+    await refreshState();
+    setStatus("最終テストを生成しました。");
   }
 
-  async function finish() {
-    if (!run) return;
+  async function submitFinal() {
+    if (!run || !assessment) return;
     setError("");
-    setStatus("run を終了しています...");
-    try {
-      await apiFetch("/api/runs/finish", { method: "POST", body: JSON.stringify({ run_id: run.run_id }) });
-      setStep({ kind: "finished" });
-      setStatus("run を終了しました。");
-    } catch (requestError) {
-      setStatus("");
-      setError(requestError instanceof Error ? requestError.message : "run の終了に失敗しました。");
-    }
+    setStatus("最終テストを提出しています...");
+    await apiFetch(`/api/runs/${run.run_id}/final-test/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers: Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer })) }),
+    });
+    const summary = await apiFetch<Result>(`/api/runs/${run.run_id}/results`);
+    setResult(summary);
+    setAssessment(null);
+    setAnswers({});
+    await refreshState();
+    setStatus("結果を作成しました。");
   }
-
-  useEffect(() => {
-    if (!run) return;
-    if (step.kind === "pre_test") {
-      void startAssessment("pre_test", null);
-    }
-    if (step.kind === "post_test") {
-      void startAssessment("post_test", null);
-    }
-  }, [run, step.kind]);
-
-  // Auto advance from pre-test submit → cycle1 material
-  useEffect(() => {
-    if (!run) return;
-    if (step.kind !== "pre_test") return;
-    if (!submitted) return;
-    void loadNextMaterial(1);
-  }, [run, step.kind, submitted]);
-
-  // Auto advance from post-test submit → finish run
-  useEffect(() => {
-    if (!run) return;
-    if (step.kind !== "post_test") return;
-    if (!submitted) return;
-    void finish();
-  }, [run, step.kind, submitted]);
-
-  const currentQuestions = assessment?.content_json?.questions ?? [];
-  const answeredCount = useMemo(() => Object.keys(answers).length, [answers]);
-  const allAnswered = currentQuestions.length > 0 && answeredCount === currentQuestions.length;
 
   if (authLoading) {
-    return (
-      <section className="card stack">
-        <p className="muted">ログイン状態を確認しています...</p>
-      </section>
-    );
+    return <section className="card">ログイン状態を確認しています...</section>;
   }
 
   if (!authUser) {
     return (
       <section className="card stack" style={{ maxWidth: 720, margin: "0 auto" }}>
-        <div>
-          <p className="muted">ログインが必要です</p>
-          <h1>学習フローを開始するにはログインしてください</h1>
-          <p className="muted">実験 run と学習ログをユーザーに紐づけるため、ログイン済みユーザーのみ利用できます。</p>
-        </div>
+        <h1>ログインが必要です</h1>
+        <p className="muted">10サイクル学習実験を開始するにはログインしてください。</p>
         <div className="inline" style={{ gap: 12 }}>
-          <Link className="button" href="/login">
-            ログイン
-          </Link>
-          <Link className="button secondary" href="/register">
-            新規登録
-          </Link>
+          <Link className="button" href="/login">ログイン</Link>
+          <Link className="button secondary" href="/register">新規登録</Link>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="stack" style={{ maxWidth: 960, margin: "0 auto" }}>
+    <section className="stack" style={{ maxWidth: 1040, margin: "0 auto" }}>
       <header className="card stack">
-        <p className="muted">Study flow（Pre → Cycle1..3 → Post）</p>
+        <p className="muted">Agent Skills 型 10サイクル学習実験</p>
         <h1>学習セッション</h1>
-        <p className="muted">
-          チャットは教材閲覧中のみ利用できます。教材・テストとも時間制限はありませんが、所要時間はログとして保存されます。
-        </p>
-        {run ? (
-          <div className="inline" style={{ gap: 16, flexWrap: "wrap" }}>
-            <span className="badge">run_id: {run.run_id}</span>
-            <span className="badge">group: {run.group}</span>
-            <span className="badge">skills_enabled: {String(run.skills_enabled)}</span>
-            <span className="badge">cycle_count: {run.cycle_count}</span>
+        <p className="muted">RAG ではなく、PDF から抽出した Document Agent Skill と Learner Agent Skill を使って教材・テストを生成します。</p>
+        {runState ? (
+          <div className="inline" style={{ gap: 10, flexWrap: "wrap" }}>
+            <span className="badge">state: {stateLabel(runState.state)}</span>
+            <span className="badge">cycle: {runState.current_cycle_index}/10</span>
+            <span className="badge">next: {runState.next_action}</span>
           </div>
         ) : null}
+        {status ? <p className="muted">{status}</p> : null}
+        {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
       </header>
 
       {!run ? (
         <form className="card stack" onSubmit={startRun}>
           <h2>run を開始</h2>
           <label className="field">
-            <span>条件（Group）</span>
-            <select onChange={(event) => setGroup(event.target.value as GroupName)} value={group}>
-              <option value="A">A（Skillsあり / 適応）</option>
-              <option value="B">B（Skillsなし / 非適応）</option>
-              <option value="C">C（書籍学習 / 固定教材）</option>
+            <span>教材</span>
+            <select value={documentId} onChange={(event) => setDocumentId(event.target.value)}>
+              <option value="">ready な教材を選択</option>
+              {documents.map((doc) => (
+                <option key={doc.document_id} value={doc.document_id}>{doc.title} / {doc.filename}</option>
+              ))}
             </select>
           </label>
-          <button className="button" type="submit">
-            開始
-          </button>
-          <p className="muted">cycle_count は MVP では {cycleCount} 固定です。</p>
+          <button className="button" disabled={!documentId} type="submit">10サイクル run を開始</button>
+          <p className="muted">ready な教材がない場合は Admin 画面で PDF upload と Document Skill extraction を実行してください。</p>
         </form>
       ) : null}
 
-      {run && (step.kind === "pre_test" || step.kind === "mini_test" || step.kind === "post_test") ? (
-        <div className="card stack">
-          <h2>
-            {step.kind === "pre_test"
-              ? "初回テスト（Pre-test）"
-              : step.kind === "post_test"
-              ? "最終テスト（Post-test）"
-              : `ミニテスト（Cycle ${step.cycle_index}）`}
-          </h2>
-          <p className="muted">時間制限なし。開始・提出時刻と所要時間をログ保存します。</p>
-
-          {!assessment ? <p className="muted">テストを読み込んでいます...</p> : null}
-
-          {assessment ? (
-            <div className="stack">
-              {currentQuestions.map((q, idx) => (
-                <div className="card stack" key={q.question_id} style={{ padding: 16 }}>
-                  <p className="muted">
-                    Q{idx + 1}（{q.question_id}）
-                  </p>
-                  <p style={{ fontWeight: 600 }}>{q.stem}</p>
-                  <div className="stack" style={{ gap: 8 }}>
-                    {q.choices.map((choice, choiceIndex) => (
-                      <label className="inline" key={choiceIndex} style={{ alignItems: "center", gap: 8 }}>
-                        <input
-                          checked={answers[q.question_id] === choiceIndex}
-                          disabled={Boolean(submitted)}
-                          name={q.question_id}
-                          onChange={() => setAnswers((cur) => ({ ...cur, [q.question_id]: choiceIndex }))}
-                          type="radio"
-                        />
-                        <span>{choice}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {submitted ? (
-                    <p className="muted">
-                      {submitted.per_question_correct.find((item) => item.question_id === q.question_id)?.is_correct ? "✅ 正解" : "❌ 不正解"}
-                    </p>
-                  ) : null}
-                </div>
-              ))}
-
-              <div className="inline" style={{ gap: 12, alignItems: "center" }}>
-                <button className="button" disabled={!assessment || Boolean(submitted) || !allAnswered} onClick={submitAssessment} type="button">
-                  回答を送信して採点
-                </button>
-                <span className="muted">
-                  回答済み: {answeredCount}/{currentQuestions.length}
-                </span>
-              </div>
-
-              {submitted ? (
-                <p className="muted">
-                  得点: {submitted.score}/{submitted.max_score}（所要時間: {formatSeconds(submitted.duration_seconds)}）
-                </p>
-              ) : null}
-
-              {step.kind === "mini_test" && submitted ? (
-                <button className="button" onClick={() => estimateAndAdvance(step.cycle_index)} type="button">
-                  理解度を推定して次へ
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+      {runState?.state === "RUN_STARTED" ? <button className="button" onClick={generateInitial}>初回テストを生成</button> : null}
+      {runState?.state === "INITIAL_TEST_SUBMITTED" || (runState?.state === "CYCLE_TEST_SUBMITTED" && runState.current_cycle_index < 10) ? (
+        <button className="button" onClick={generateMaterial}>Cycle {currentCycle} 教材を生成</button>
+      ) : null}
+      {runState?.state === "CYCLE_MATERIAL_READ" ? <button className="button" onClick={generateCycleTest}>Cycle {currentCycle} テストを生成</button> : null}
+      {runState?.state === "CYCLE_TEST_SUBMITTED" && runState.current_cycle_index === 10 ? (
+        <button className="button" onClick={generateFinal}>最終テストを生成</button>
       ) : null}
 
-      {run && step.kind === "material" && material ? (
-        <div className="card stack">
-          <div className="inline" style={{ justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <h2>教材（Cycle {step.cycle_index}）</h2>
-            <span className="badge">source: {material.source_type}</span>
-          </div>
-          <p className="muted">
-            チャットは教材閲覧中のみ利用できます（読了後は不可）。時間制限はありません。
-          </p>
-
-          <article className="card" style={{ padding: 16, whiteSpace: "pre-wrap" }}>
-            {material.content_text}
-          </article>
-
-          <div className="inline" style={{ gap: 12, flexWrap: "wrap" }}>
-            <button className="button" disabled={Boolean(materialReadConfirmedAt)} onClick={confirmRead} type="button">
-              読了
-            </button>
-            <span className="muted">
-              閲覧開始: {materialPresentedAt ? materialPresentedAt.toLocaleTimeString() : "-"} / 読了:{" "}
-              {materialReadConfirmedAt ? materialReadConfirmedAt.toLocaleTimeString() : "-"} / 所要時間:{" "}
-              {formatSeconds(materialReadDurationSeconds)}
-            </span>
-          </div>
-
-          <div className="card stack" style={{ padding: 16 }}>
-            <h3>教材について質問（教材閲覧中のみ）</h3>
-            {run.group === "C" ? <p className="muted">Group C ではチャットは利用できません。</p> : null}
-            {!canChat ? <p className="muted">チャットは「読了」前のみ利用できます。</p> : null}
-            <form className="inline" onSubmit={handleChatAsk} style={{ gap: 12, alignItems: "center" }}>
-              <input
-                disabled={!canChat}
-                onChange={(event) => setChatQuestion(event.target.value)}
-                placeholder="例: この段落の要点は？"
-                value={chatQuestion}
-              />
-              <button className="button secondary" disabled={!canChat || !chatQuestion.trim()} type="submit">
-                質問する
-              </button>
-            </form>
-            {chatStatus ? <p className="muted">{chatStatus}</p> : null}
-            {chatHistory.length ? (
-              <div className="stack" style={{ gap: 12 }}>
-                {chatHistory.map((item, idx) => (
-                  <div className="card stack" key={idx} style={{ padding: 12 }}>
-                    <p style={{ fontWeight: 600 }}>Q: {item.q}</p>
-                    <p style={{ whiteSpace: "pre-wrap" }}>A: {item.a}</p>
-                    <p className="muted">{new Date(item.at).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="muted">まだ質問はありません。</p>
-            )}
-          </div>
-
-          <p className="muted">読了後、ミニテストへ進みます（画面遷移は自動）。</p>
-        </div>
+      {material && runState?.state === "CYCLE_MATERIAL_GENERATED" ? (
+        <article className="card stack">
+          <h2>{material.title}</h2>
+          <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{material.content_markdown}</pre>
+          <button className="button" onClick={confirmRead}>読了してテストへ進む</button>
+        </article>
       ) : null}
 
-      {step.kind === "finished" ? (
+      {assessment ? (
         <section className="card stack">
-          <h2>完了</h2>
-          <p className="muted">run を終了しました。ログのエクスポートはバックエンドの `/api/experiments/export.csv` を利用してください。</p>
-          <button
-            className="button"
-            onClick={() => {
-              setRun(null);
-              setStep({ kind: "idle" });
-              setStatus("");
-              setError("");
-            }}
-            type="button"
-          >
-            もう一度実施
-          </button>
+          <h2>{assessment.title}</h2>
+          {assessment.questions.map((question, index) => (
+            <div className="card stack" key={question.question_id} style={{ padding: 16 }}>
+              <p className="muted">Q{index + 1} / {question.topic} / {question.difficulty}</p>
+              <p style={{ fontWeight: 700 }}>{question.stem}</p>
+              {question.choices.map((choice) => (
+                <label className="inline" key={choice} style={{ gap: 8 }}>
+                  <input
+                    checked={answers[question.question_id] === choice}
+                    onChange={() => setAnswers((current) => ({ ...current, [question.question_id]: choice }))}
+                    type="radio"
+                  />
+                  <span>{choice}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+          {runState?.state === "INITIAL_TEST_GENERATED" ? (
+            <button className="button" disabled={!allAnswered} onClick={submitInitial}>初回テストを提出</button>
+          ) : null}
+          {runState?.state === "CYCLE_TEST_GENERATED" ? (
+            <button className="button" disabled={!allAnswered} onClick={submitCycleTest}>Cycle {currentCycle} テストを提出</button>
+          ) : null}
+          {runState?.state === "FINAL_TEST_GENERATED" ? (
+            <button className="button" disabled={!allAnswered} onClick={submitFinal}>最終テストを提出</button>
+          ) : null}
         </section>
       ) : null}
 
-      {status ? <p className="muted">{status}</p> : null}
-      {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
-      {mastery ? (
-        <div className="card stack">
-          <h3>直近の理解度推定</h3>
-          <p className="muted">
-            Cycle {mastery.cycle_index}: mastery={mastery.estimate_json.mastery_estimate.toFixed(2)} / confidence=
-            {mastery.estimate_json.confidence.toFixed(2)} / next={mastery.estimate_json.next_difficulty_recommendation}
-          </p>
-          <p className="muted">{mastery.estimate_json.evidence_summary}</p>
-        </div>
+      {result ? (
+        <section className="card stack">
+          <h2>成績向上結果</h2>
+          <div className="grid-2">
+            <p>初回スコア: {result.initial_score}</p>
+            <p>最終スコア: {result.final_score}</p>
+            <p>点数差: {result.gain_score}</p>
+            <p>正答率差: {(result.accuracy_gain * 100).toFixed(1)}%</p>
+          </div>
+          <p>{result.ai_summary}</p>
+          <h3>Cycle score trend</h3>
+          <ul>
+            {result.cycle_score_trend.map((row) => (
+              <li key={row.cycle_index}>Cycle {row.cycle_index}: {row.score}/{row.max_score}</li>
+            ))}
+          </ul>
+        </section>
       ) : null}
     </section>
   );
 }
-

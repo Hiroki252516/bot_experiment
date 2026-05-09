@@ -7,6 +7,13 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings, get_settings
+from app.schemas.adaptive import (
+    AssessmentPayload,
+    DocumentSkillPayload,
+    GeneratedMaterialPayload,
+    LearnerSkillPayload,
+    ResultSummaryPayload,
+)
 from app.schemas.document_skill import DocumentSkillDelta
 from app.schemas.llm import GeneratedCandidateSet, ProviderMetadata, SkillDelta
 
@@ -87,6 +94,81 @@ class GenerationProvider(ABC):
         skills_enabled: bool,
         document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
+        raise NotImplementedError
+
+    def extract_document_skill(
+        self,
+        document_metadata: dict,
+        source_text: str,
+    ) -> tuple[DocumentSkillPayload, ProviderMetadata]:
+        raise NotImplementedError
+
+    def generate_initial_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        raise NotImplementedError
+
+    def analyze_attempt_and_create_learner_skill(
+        self,
+        document_skill: dict,
+        assessment: dict,
+        attempt: dict,
+        revision: int,
+        previous_skill: dict | None = None,
+    ) -> tuple[LearnerSkillPayload, ProviderMetadata]:
+        raise NotImplementedError
+
+    def generate_learning_material(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+    ) -> tuple[GeneratedMaterialPayload, ProviderMetadata]:
+        raise NotImplementedError
+
+    def generate_cycle_test(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        raise NotImplementedError
+
+    def update_learner_skill(
+        self,
+        document_skill: dict,
+        previous_skill: dict,
+        assessment: dict,
+        attempt: dict,
+        revision: int,
+    ) -> tuple[LearnerSkillPayload, ProviderMetadata]:
+        return self.analyze_attempt_and_create_learner_skill(
+            document_skill=document_skill,
+            assessment=assessment,
+            attempt=attempt,
+            revision=revision,
+            previous_skill=previous_skill,
+        )
+
+    def generate_final_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        return self.generate_initial_test(document_skill, question_count, used_fingerprints)
+
+    def generate_result_summary(
+        self,
+        document_skill: dict,
+        learner_skill_history: list[dict],
+        score_summary: dict,
+    ) -> tuple[ResultSummaryPayload, ProviderMetadata]:
         raise NotImplementedError
 
 
@@ -349,6 +431,204 @@ class MockGenerationProvider(GenerationProvider):
                 raw_response={"mode": "mock-answer"},
             ),
         )
+
+    def _adaptive_meta(self, mode: str) -> ProviderMetadata:
+        return ProviderMetadata(
+            provider_name=self.provider_name,
+            model_name="mock-model",
+            temperature=self.settings.generation_temperature,
+            top_p=self.settings.generation_top_p,
+            prompt_version=self.settings.prompt_version,
+            raw_response={"mode": mode},
+        )
+
+    def extract_document_skill(
+        self,
+        document_metadata: dict,
+        source_text: str,
+    ) -> tuple[DocumentSkillPayload, ProviderMetadata]:
+        title = document_metadata.get("title") or document_metadata.get("filename") or "教材"
+        lines = [line.strip(" -・\t") for line in source_text.splitlines() if line.strip()]
+        topics = lines[:5] or [title]
+        payload = DocumentSkillPayload.model_validate(
+            {
+                "learning_objectives": [f"{topic[:80]}を理解する" for topic in topics[:3]],
+                "topic_map": [{"topic_key": f"topic_{i}", "title": topic[:80]} for i, topic in enumerate(topics, start=1)],
+                "concept_definitions": [
+                    {"term": topic[:40], "definition": topic[:240], "topic_key": f"topic_{i}"}
+                    for i, topic in enumerate(topics[:5], start=1)
+                ],
+                "prerequisite_concepts": [],
+                "examples": [{"title": "教材例", "content": (source_text[:500] or title)}],
+                "common_misconceptions": ["キーワードだけを暗記し、条件や例外を確認しない"],
+                "difficulty_map": [{"topic_key": "topic_1", "difficulty": "basic"}],
+                "assessment_blueprint": [{"topic_key": "topic_1", "weight": 1.0, "difficulty": "basic"}],
+                "canonical_explanations": [{"topic_key": "topic_1", "content": source_text[:800] or title}],
+                "out_of_scope": [],
+                "source_pdf_metadata": document_metadata,
+                "revision": 1,
+            }
+        )
+        return payload, self._adaptive_meta("mock-document-skill")
+
+    def _mock_assessment(
+        self,
+        title: str,
+        prefix: str,
+        question_count: int,
+        used_fingerprints: list[str],
+        focus_topics: list[str] | None = None,
+    ) -> AssessmentPayload:
+        topics = focus_topics or ["topic_1"]
+        questions = []
+        used = set(used_fingerprints)
+        for index in range(1, question_count + 1):
+            topic = topics[(index - 1) % len(topics)] if topics else "topic_1"
+            fingerprint = f"{prefix}_{index}_{topic}".lower()
+            suffix = 0
+            while fingerprint in used:
+                suffix += 1
+                fingerprint = f"{prefix}_{index}_{topic}_{suffix}".lower()
+            used.add(fingerprint)
+            questions.append(
+                {
+                    "question_id": f"{prefix}_q{index}",
+                    "topic": topic,
+                    "subtopic": "",
+                    "difficulty": "basic" if index % 3 == 1 else "standard" if index % 3 == 2 else "advanced",
+                    "stem": f"{topic} について、教材内容に最も合う説明を選んでください。",
+                    "choices": ["教材内容に沿った説明", "教材範囲外の説明", "誤った一般化", "判断できない"],
+                    "correct_answer": "教材内容に沿った説明",
+                    "rubric": "正答は教材内容に沿った説明。",
+                    "fingerprint": fingerprint,
+                }
+            )
+        return AssessmentPayload.model_validate({"title": title, "questions": questions, "blueprint": {"mock": True}})
+
+    def generate_initial_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        topics = [str(item.get("topic_key") or item.get("title") or "topic_1") for item in document_skill.get("topic_map", [])]
+        return self._mock_assessment("初回テスト", "initial", question_count, used_fingerprints, topics), self._adaptive_meta("mock-initial-test")
+
+    def analyze_attempt_and_create_learner_skill(
+        self,
+        document_skill: dict,
+        assessment: dict,
+        attempt: dict,
+        revision: int,
+        previous_skill: dict | None = None,
+    ) -> tuple[LearnerSkillPayload, ProviderMetadata]:
+        per_question = attempt.get("per_question_correct", [])
+        questions = {q.get("question_id"): q for q in assessment.get("questions", [])}
+        topic_totals: dict[str, list[int]] = {}
+        for result in per_question:
+            question = questions.get(result.get("question_id"), {})
+            topic = str(question.get("topic") or "topic_1")
+            topic_totals.setdefault(topic, []).append(1 if result.get("is_correct") else 0)
+        mastery = {
+            topic: sum(values) / max(1, len(values))
+            for topic, values in topic_totals.items()
+        }
+        known = [topic for topic, value in mastery.items() if value >= 0.7]
+        weak = [topic for topic, value in mastery.items() if value < 0.7] or list(mastery)[:1]
+        used = list((previous_skill or {}).get("used_question_fingerprints", []))
+        used.extend([str(q.get("fingerprint", "")) for q in assessment.get("questions", []) if q.get("fingerprint")])
+        payload = LearnerSkillPayload.model_validate(
+            {
+                "overall_mastery": attempt.get("score", 0) / max(1, attempt.get("max_score", 1)),
+                "mastery_by_topic": mastery,
+                "known_topics": known,
+                "weak_topics": weak,
+                "common_mistakes": ["不正解だった設問の概念を再確認する"],
+                "misconception_hypotheses": ["選択肢の細部を読み落としている可能性"],
+                "recommended_next_focus": weak,
+                "recommended_difficulty": "basic" if weak else "standard",
+                "generated_material_history_summary": (previous_skill or {}).get("generated_material_history_summary", []),
+                "used_question_fingerprints": list(dict.fromkeys(used)),
+                "evidence_from_attempts": [{"attempt": attempt}],
+                "revision": revision,
+            }
+        )
+        return payload, self._adaptive_meta("mock-learner-skill")
+
+    def generate_learning_material(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+    ) -> tuple[GeneratedMaterialPayload, ProviderMetadata]:
+        weak_topics = learner_skill.get("weak_topics", []) or learner_skill.get("recommended_next_focus", []) or ["topic_1"]
+        payload = GeneratedMaterialPayload.model_validate(
+            {
+                "title": f"Cycle {cycle_index}: 弱点補強教材",
+                "learning_goals": [f"{topic}を説明できる" for topic in weak_topics],
+                "body": "\n\n".join(
+                    [
+                        f"# Cycle {cycle_index} 弱点補強教材",
+                        "この教材は Document Agent Skill と Learner Agent Skill に基づいて生成された研究用教材です。",
+                        "## 重点項目",
+                        "\n".join(f"- {topic}" for topic in weak_topics),
+                        "## 解説",
+                        "教材の定義、例、よくある誤りを確認しながら、次のテストで問われる観点を整理してください。",
+                    ]
+                ),
+                "examples": ["教材中の例を自分の言葉で説明する"],
+                "common_mistakes": learner_skill.get("common_mistakes", []),
+                "checkpoints": [f"{topic}の要点を説明できる" for topic in weak_topics],
+                "target_topics": weak_topics,
+                "difficulty": learner_skill.get("recommended_difficulty", "basic"),
+            }
+        )
+        return payload, self._adaptive_meta("mock-material-v2")
+
+    def generate_cycle_test(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        topics = learner_skill.get("weak_topics", []) or learner_skill.get("recommended_next_focus", []) or ["topic_1"]
+        return self._mock_assessment(
+            f"Cycle {cycle_index} テスト",
+            f"cycle{cycle_index}",
+            question_count,
+            used_fingerprints,
+            topics,
+        ), self._adaptive_meta("mock-cycle-test")
+
+    def generate_final_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        topics = [str(item.get("topic_key") or item.get("title") or "topic_1") for item in document_skill.get("topic_map", [])]
+        return self._mock_assessment("最終テスト", "final", question_count, used_fingerprints, topics), self._adaptive_meta("mock-final-test")
+
+    def generate_result_summary(
+        self,
+        document_skill: dict,
+        learner_skill_history: list[dict],
+        score_summary: dict,
+    ) -> tuple[ResultSummaryPayload, ProviderMetadata]:
+        payload = ResultSummaryPayload.model_validate(
+            {
+                "ai_summary": (
+                    f"初回 {score_summary.get('initial_score', 0)} 点から最終 "
+                    f"{score_summary.get('final_score', 0)} 点になりました。"
+                ),
+                "improved_topics": score_summary.get("improved_topics", []),
+                "remaining_weak_topics": score_summary.get("remaining_weak_topics", []),
+                "misconception_reduction": {},
+            }
+        )
+        return payload, self._adaptive_meta("mock-result-summary")
 
 
 class GeminiGenerationProvider(GenerationProvider):
@@ -890,6 +1170,148 @@ class OllamaGenerationProvider(GenerationProvider):
             ),
         )
 
+    def _adaptive_metadata(self, raw: dict[str, Any]) -> ProviderMetadata:
+        return ProviderMetadata(
+            provider_name=self.provider_name,
+            model_name=self.settings.ollama_model_generate,
+            temperature=self.settings.generation_temperature,
+            top_p=self.settings.generation_top_p,
+            prompt_version=self.settings.prompt_version,
+            raw_response=raw,
+        )
+
+    def extract_document_skill(
+        self,
+        document_metadata: dict,
+        source_text: str,
+    ) -> tuple[DocumentSkillPayload, ProviderMetadata]:
+        schema = _ollama_document_agent_skill_schema()
+        prompt = (
+            "あなたは研究用学習アプリの Document Agent Skill 抽出器です。\n"
+            "PDF教材本文から、学習・テスト生成に再利用できる構造化JSONを作成してください。\n"
+            "RAG用chunkや検索用情報ではなく、教材範囲の知識状態として保存するJSONを返してください。\n"
+            "出力は必ずJSON schemaに従ってください。\n"
+            f"document_metadata: {json.dumps(document_metadata, ensure_ascii=False)}\n"
+            f"source_text:\n{source_text[:24000]}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return DocumentSkillPayload.model_validate(result["parsed"]), self._adaptive_metadata(result["raw"])
+
+    def _generate_adaptive_assessment(
+        self,
+        generation_type: str,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+        learner_skill: dict | None = None,
+        cycle_index: int | None = None,
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        schema = _ollama_adaptive_assessment_schema(question_count)
+        prompt = (
+            "あなたは研究用学習アプリの採点可能なMCQテスト生成器です。\n"
+            "出力は必ずJSON schemaに従ってください。JSON外の説明は禁止です。\n"
+            "各問題には topic, subtopic, difficulty, stem, choices, correct_answer, rubric, fingerprint を含めてください。\n"
+            "fingerprint は過去 fingerprint と完全一致しない短い識別子にしてください。\n"
+            f"generation_type: {generation_type}\n"
+            f"cycle_index: {cycle_index}\n"
+            f"question_count: {question_count}\n"
+            f"used_fingerprints: {json.dumps(used_fingerprints, ensure_ascii=False)}\n"
+            f"Document Agent Skill: {json.dumps(document_skill, ensure_ascii=False)}\n"
+            f"Learner Agent Skill: {json.dumps(learner_skill or {}, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return AssessmentPayload.model_validate(result["parsed"]), self._adaptive_metadata(result["raw"])
+
+    def generate_initial_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        return self._generate_adaptive_assessment("initial_test", document_skill, question_count, used_fingerprints)
+
+    def analyze_attempt_and_create_learner_skill(
+        self,
+        document_skill: dict,
+        assessment: dict,
+        attempt: dict,
+        revision: int,
+        previous_skill: dict | None = None,
+    ) -> tuple[LearnerSkillPayload, ProviderMetadata]:
+        schema = _ollama_learner_skill_schema()
+        prompt = (
+            "あなたは学習者のテスト結果を分析し Learner Agent Skill を更新するAIです。\n"
+            "出力は必ずJSON schemaに従ってください。\n"
+            f"revision: {revision}\n"
+            f"previous_skill: {json.dumps(previous_skill or {}, ensure_ascii=False)}\n"
+            f"Document Agent Skill: {json.dumps(document_skill, ensure_ascii=False)}\n"
+            f"assessment: {json.dumps(assessment, ensure_ascii=False)}\n"
+            f"attempt: {json.dumps(attempt, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        payload = LearnerSkillPayload.model_validate({**result["parsed"], "revision": revision})
+        return payload, self._adaptive_metadata(result["raw"])
+
+    def generate_learning_material(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+    ) -> tuple[GeneratedMaterialPayload, ProviderMetadata]:
+        schema = _ollama_generated_material_schema()
+        prompt = (
+            "あなたは弱点補強用の教科書・参考書風教材を生成するAIです。\n"
+            "Document Agent Skill の範囲外には出ず、Learner Agent Skill の weak_topics を重点化してください。\n"
+            "出力は必ずJSON schemaに従ってください。\n"
+            f"cycle_index: {cycle_index}\n"
+            f"Document Agent Skill: {json.dumps(document_skill, ensure_ascii=False)}\n"
+            f"Learner Agent Skill: {json.dumps(learner_skill, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return GeneratedMaterialPayload.model_validate(result["parsed"]), self._adaptive_metadata(result["raw"])
+
+    def generate_cycle_test(
+        self,
+        document_skill: dict,
+        learner_skill: dict,
+        cycle_index: int,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        return self._generate_adaptive_assessment(
+            "cycle_test",
+            document_skill,
+            question_count,
+            used_fingerprints,
+            learner_skill,
+            cycle_index,
+        )
+
+    def generate_final_test(
+        self,
+        document_skill: dict,
+        question_count: int,
+        used_fingerprints: list[str],
+    ) -> tuple[AssessmentPayload, ProviderMetadata]:
+        return self._generate_adaptive_assessment("final_test", document_skill, question_count, used_fingerprints)
+
+    def generate_result_summary(
+        self,
+        document_skill: dict,
+        learner_skill_history: list[dict],
+        score_summary: dict,
+    ) -> tuple[ResultSummaryPayload, ProviderMetadata]:
+        schema = _ollama_result_summary_schema()
+        prompt = (
+            "あなたは研究用学習実験の結果を簡潔に総評するAIです。\n"
+            "出力は必ずJSON schemaに従ってください。\n"
+            f"Document Agent Skill: {json.dumps(document_skill, ensure_ascii=False)}\n"
+            f"Learner Skill history: {json.dumps(learner_skill_history, ensure_ascii=False)}\n"
+            f"score_summary: {json.dumps(score_summary, ensure_ascii=False)}\n"
+        )
+        result = self._generate_json(prompt, schema)
+        return ResultSummaryPayload.model_validate(result["parsed"]), self._adaptive_metadata(result["raw"])
+
 
 def _document_skill_prompt(document_metadata: dict, source_unit: dict, previous_document_skill: dict) -> str:
     return (
@@ -1099,6 +1521,143 @@ def _gemini_document_skill_delta_schema() -> dict[str, Any]:
 def _ollama_document_skill_delta_schema() -> dict[str, Any]:
     schema = _gemini_document_skill_delta_schema()
     return _lower_schema_types(schema)
+
+
+def _ollama_document_agent_skill_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "learning_objectives": {"type": "array", "items": {"type": "string"}},
+            "topic_map": {"type": "array", "items": {"type": "object"}},
+            "concept_definitions": {"type": "array", "items": {"type": "object"}},
+            "prerequisite_concepts": {"type": "array", "items": {"type": "string"}},
+            "examples": {"type": "array", "items": {"type": "object"}},
+            "common_misconceptions": {"type": "array", "items": {"type": "string"}},
+            "difficulty_map": {"type": "array", "items": {"type": "object"}},
+            "assessment_blueprint": {"type": "array", "items": {"type": "object"}},
+            "canonical_explanations": {"type": "array", "items": {"type": "object"}},
+            "out_of_scope": {"type": "array", "items": {"type": "string"}},
+            "source_pdf_metadata": {"type": "object"},
+            "revision": {"type": "integer"},
+        },
+        "required": [
+            "learning_objectives",
+            "topic_map",
+            "concept_definitions",
+            "prerequisite_concepts",
+            "examples",
+            "common_misconceptions",
+            "difficulty_map",
+            "assessment_blueprint",
+            "canonical_explanations",
+            "out_of_scope",
+            "source_pdf_metadata",
+            "revision",
+        ],
+    }
+
+
+def _ollama_adaptive_assessment_schema(question_count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "questions": {
+                "type": "array",
+                "minItems": question_count,
+                "maxItems": question_count,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question_id": {"type": "string"},
+                        "topic": {"type": "string"},
+                        "subtopic": {"type": "string"},
+                        "difficulty": {"type": "string", "enum": ["basic", "standard", "advanced"]},
+                        "stem": {"type": "string"},
+                        "choices": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+                        "correct_answer": {"type": "string"},
+                        "rubric": {"type": "string"},
+                        "fingerprint": {"type": "string"},
+                    },
+                    "required": [
+                        "question_id",
+                        "topic",
+                        "difficulty",
+                        "stem",
+                        "choices",
+                        "correct_answer",
+                        "rubric",
+                        "fingerprint",
+                    ],
+                },
+            },
+            "blueprint": {"type": "object"},
+        },
+        "required": ["title", "questions"],
+    }
+
+
+def _ollama_learner_skill_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "overall_mastery": {"type": "number"},
+            "mastery_by_topic": {"type": "object"},
+            "known_topics": {"type": "array", "items": {"type": "string"}},
+            "weak_topics": {"type": "array", "items": {"type": "string"}},
+            "common_mistakes": {"type": "array", "items": {"type": "string"}},
+            "misconception_hypotheses": {"type": "array", "items": {"type": "string"}},
+            "recommended_next_focus": {"type": "array", "items": {"type": "string"}},
+            "recommended_difficulty": {"type": "string"},
+            "generated_material_history_summary": {"type": "array", "items": {"type": "string"}},
+            "used_question_fingerprints": {"type": "array", "items": {"type": "string"}},
+            "evidence_from_attempts": {"type": "array", "items": {"type": "object"}},
+            "revision": {"type": "integer"},
+        },
+        "required": [
+            "overall_mastery",
+            "mastery_by_topic",
+            "known_topics",
+            "weak_topics",
+            "common_mistakes",
+            "misconception_hypotheses",
+            "recommended_next_focus",
+            "recommended_difficulty",
+            "generated_material_history_summary",
+            "used_question_fingerprints",
+            "evidence_from_attempts",
+        ],
+    }
+
+
+def _ollama_generated_material_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "learning_goals": {"type": "array", "items": {"type": "string"}},
+            "body": {"type": "string"},
+            "examples": {"type": "array", "items": {"type": "string"}},
+            "common_mistakes": {"type": "array", "items": {"type": "string"}},
+            "checkpoints": {"type": "array", "items": {"type": "string"}},
+            "target_topics": {"type": "array", "items": {"type": "string"}},
+            "difficulty": {"type": "string"},
+        },
+        "required": ["title", "learning_goals", "body", "examples", "common_mistakes", "checkpoints", "target_topics", "difficulty"],
+    }
+
+
+def _ollama_result_summary_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "ai_summary": {"type": "string"},
+            "improved_topics": {"type": "array", "items": {"type": "string"}},
+            "remaining_weak_topics": {"type": "array", "items": {"type": "string"}},
+            "misconception_reduction": {"type": "object"},
+        },
+        "required": ["ai_summary", "improved_topics", "remaining_weak_topics", "misconception_reduction"],
+    }
 
 
 def _lower_schema_types(value: Any) -> Any:

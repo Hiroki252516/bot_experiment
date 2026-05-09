@@ -1,350 +1,168 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
 import { apiFetch, getApiBaseUrl } from "../lib/api";
 
-type DocumentRow = {
+type SourceDocument = {
   document_id: string;
+  title: string;
+  description: string | null;
   filename: string;
   mime_type: string;
-  source_type: string;
-  ingest_status: string;
+  status: string;
   created_at: string;
-  document_skill_status: string | null;
-  active_document_skill_revision_id: string | null;
-  document_skill_revision_number: number | null;
-  document_skill_entries_count: number;
-  document_skill_updated_at: string | null;
+  updated_at: string;
 };
 
-type DocumentSkillEntry = {
-  entry_id: string;
-  entry_type: string;
-  title: string;
-  content: string;
-  source_page: number | null;
-  source_span: string | null;
-};
-
-type SkillHistory = {
-  user_id: string;
-  revisions: Array<{
-    revision_id: string;
-    revision_number: number;
-    summary_rule: string;
-    update_reason: string;
-    profile_json: Record<string, unknown>;
-    created_at: string;
-  }>;
-};
-
-type ExperimentRun = {
-  run_id: string;
-  user_id: string;
-  chat_message_id: string;
-  condition_name: string;
-  skills_enabled: boolean;
-  candidate_count: number;
-  notes: string | null;
-  created_at: string;
-};
-
-type RuntimeProvider = {
-  generation_provider: string;
-  embedding_provider: string;
-  generation_model: string;
-  embedding_model: string;
-  embedding_dimensions: number;
-  local_embed_device: string;
-};
+type ExportJob = { export_job_id: string; status: string; file_path: string | null };
 
 export function AdminWorkspace() {
-  const [documents, setDocuments] = useState<DocumentRow[]>([]);
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [userId, setUserId] = useState("");
-  const [skillHistory, setSkillHistory] = useState<SkillHistory | null>(null);
-  const [runs, setRuns] = useState<ExperimentRun[]>([]);
-  const [runtime, setRuntime] = useState<RuntimeProvider | null>(null);
-  const [documentSkillEntries, setDocumentSkillEntries] = useState<DocumentSkillEntry[]>([]);
-  const [selectedDocumentName, setSelectedDocumentName] = useState("");
+  const [title, setTitle] = useState("");
+  const [runId, setRunId] = useState("");
+  const [exportJob, setExportJob] = useState<ExportJob | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
-  const exportUrl = useMemo(() => `${getApiBaseUrl()}/api/experiments/exports/logs.zip`, []);
-
   async function refreshDocuments() {
-    const response = await apiFetch<DocumentRow[]>("/api/documents");
+    const response = await apiFetch<SourceDocument[]>("/api/admin/documents");
     setDocuments(response);
   }
 
-  async function refreshRuns() {
-    const response = await apiFetch<ExperimentRun[]>("/api/experiments/runs");
-    setRuns(response);
+  useEffect(() => {
+    void refreshDocuments();
+  }, []);
+
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    if (file && !title) setTitle(file.name);
   }
 
-  async function refreshRuntime() {
-    const response = await apiFetch<RuntimeProvider>("/api/admin/runtime");
-    setRuntime(response);
-  }
-
-  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    setSelectedFile(event.target.files?.[0] ?? null);
-  }
-
-  async function handleUpload(event: FormEvent<HTMLFormElement>) {
+  async function handleUpload(event: FormEvent) {
     event.preventDefault();
     if (!selectedFile) return;
     setError("");
-    setStatus("教材をアップロードしています...");
+    setStatus("PDF教材をアップロードしています...");
     try {
       const formData = new FormData();
       formData.append("file", selectedFile);
-      const uploadResponse = await fetch(`${getApiBaseUrl()}/api/documents/upload`, {
+      formData.append("title", title || selectedFile.name);
+      const response = await fetch(`${getApiBaseUrl()}/api/admin/documents/upload`, {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
-      if (!uploadResponse.ok) {
-        throw new Error(await uploadResponse.text());
-      }
-      const document = (await uploadResponse.json()) as DocumentRow;
-      await apiFetch(`/api/documents/${document.document_id}/ingest`, {
-        method: "POST",
-      });
-      setStatus("アップロードが完了しました。Document Skill extraction job を登録しました。");
+      if (!response.ok) throw new Error(await response.text());
+      setStatus("アップロードしました。Document Agent Skill extraction を実行してください。");
+      setSelectedFile(null);
       await refreshDocuments();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "アップロードに失敗しました。");
+      setStatus("");
     }
   }
 
-  async function handleDeleteDocument(document: DocumentRow) {
-    const confirmed = window.confirm(
-      `教材「${document.filename}」を削除します。Document Skill、extraction jobs、legacy chunks/embeddings/logs、保存ファイルも削除されます。よろしいですか？`,
-    );
-    if (!confirmed) return;
+  async function extractSkill(documentId: string) {
     setError("");
-    setStatus("教材を削除しています...");
+    setStatus("Document Agent Skill を抽出しています...");
     try {
-      await apiFetch(`/api/documents/${document.document_id}`, { method: "DELETE" });
-      setStatus("教材を削除しました。");
+      await apiFetch(`/api/admin/documents/${documentId}/extract-skill`, { method: "POST" });
+      setStatus("Document Agent Skill を抽出しました。被験者 run を開始できます。");
       await refreshDocuments();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "教材の削除に失敗しました。");
+      setError(requestError instanceof Error ? requestError.message : "Document Agent Skill extraction に失敗しました。");
+      setStatus("");
     }
   }
 
-  async function handleLoadDocumentSkillEntries(document: DocumentRow) {
-    setError("");
-    try {
-      const response = await apiFetch<DocumentSkillEntry[]>(`/api/documents/${document.document_id}/skill/entries`);
-      setDocumentSkillEntries(response);
-      setSelectedDocumentName(document.filename);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Document Skill entries の取得に失敗しました。");
-    }
-  }
-
-  async function handleLoadHistory(event: FormEvent<HTMLFormElement>) {
+  async function exportRun(event: FormEvent) {
     event.preventDefault();
+    if (!runId) return;
     setError("");
+    setStatus("CSV export を作成しています...");
     try {
-      const response = await apiFetch<SkillHistory>(`/api/admin/skills/history/${userId}`);
-      setSkillHistory(response);
+      const job = await apiFetch<ExportJob>(`/api/admin/exports/runs/${runId}`, { method: "POST" });
+      setExportJob(job);
+      setStatus("CSV export を作成しました。");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "スキル履歴の取得に失敗しました。");
-      setSkillHistory(null);
+      setError(requestError instanceof Error ? requestError.message : "CSV export に失敗しました。");
+      setStatus("");
     }
-  }
-
-  async function handleRecompute() {
-    if (!userId) return;
-    setError("");
-    try {
-      await apiFetch(`/api/admin/skills/recompute/${userId}`, { method: "POST" });
-      setStatus("スキル再計算ジョブを登録しました。");
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "スキル再計算に失敗しました。");
-    }
-  }
-
-  async function handleRefresh() {
-    setError("");
-    await Promise.all([refreshDocuments(), refreshRuns(), refreshRuntime()]);
   }
 
   return (
     <div className="stack">
       <section className="hero">
         <div className="card stack">
-          <div>
-            <p className="muted">管理 / 実験</p>
-            <h1>研究用の操作</h1>
-            <p className="muted">教材投入、スキル履歴の確認、実験ログの出力を行います。</p>
-          </div>
-          <div className="grid-2">
-            <button className="button" onClick={handleRefresh} type="button">
-              教材と実験ログを更新
-            </button>
-            <a className="button secondary" href={exportUrl}>
-              logs.zip をダウンロード
-            </a>
-          </div>
+          <p className="muted">管理 / Agent Skills 実験</p>
+          <h1>研究用管理画面</h1>
+          <p className="muted">PDF 教材を Document Agent Skill に変換し、10サイクル実験のログを export します。新 runtime path では RAG / embedding retrieval を使いません。</p>
+          <button className="button secondary" onClick={refreshDocuments} type="button">教材一覧を更新</button>
           {status ? <p className="muted">{status}</p> : null}
           {error ? <p style={{ color: "#8d3f24" }}>{error}</p> : null}
-          {runtime ? (
-            <div className="card" style={{ padding: 16 }}>
-              <p className="muted">実行設定</p>
-              <p>
-                生成: {runtime.generation_provider} / {runtime.generation_model}
-              </p>
-              <p>Document Skill: runtime RAG / embedding は legacy。回答生成は Document Skill entries を参照します。</p>
-            </div>
-          ) : null}
         </div>
 
         <form className="card stack" onSubmit={handleUpload}>
-          <div>
-            <h2>Document Skill extraction</h2>
-            <p className="muted">`pdf`、`md`、`txt` をアップロードし、教材を Document Skill entries として構造化します。</p>
-          </div>
+          <h2>PDF 教材アップロード</h2>
           <label className="field">
-            <span>ファイル</span>
+            <span>教材タイトル</span>
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例: 仮定法教材" />
+          </label>
+          <label className="field">
+            <span>PDF / md / txt</span>
             <input accept=".pdf,.md,.txt,text/plain,application/pdf,text/markdown" onChange={handleFileChange} type="file" />
           </label>
-          <button className="button" type="submit">
-            アップロードして Document Skill extraction を登録
-          </button>
+          <button className="button" disabled={!selectedFile} type="submit">アップロード</button>
         </form>
       </section>
 
-      <section className="grid-2">
-        <div className="card stack">
-          <h2>投入済み教材</h2>
-          <div className="table-scroll">
-            <table className="table admin-documents-table">
-              <thead>
-                <tr>
-                  <th>ファイル名</th>
-                  <th>状態</th>
-                  <th>Document Skill</th>
-                  <th>entries</th>
-                  <th>種類</th>
-                  <th>由来</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((document) => (
-                  <tr key={document.document_id}>
-                    <td className="break-anywhere">{document.filename}</td>
-                    <td>{document.ingest_status}</td>
-                    <td>
-                      {document.document_skill_status ?? "未作成"}
-                      {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
-                    </td>
-                    <td>{document.document_skill_entries_count}</td>
-                    <td className="break-anywhere">{document.mime_type}</td>
-                    <td>{document.source_type}</td>
-                    <td>
-                      <div className="table-actions">
-                        <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
-                          entries
-                        </button>
-                        <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
-                          削除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card stack">
-          <h2>実験ログ</h2>
-          <div className="table-scroll">
-            <table className="table admin-runs-table">
-              <thead>
-                <tr>
-                  <th>条件</th>
-                  <th>ユーザー</th>
-                  <th>スキル</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.run_id}>
-                    <td>{run.condition_name}</td>
-                    <td className="break-anywhere">{run.user_id}</td>
-                    <td>{String(run.skills_enabled)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
       <section className="card stack">
-        <div>
-          <h2>Document Skill viewer</h2>
-          <p className="muted">{selectedDocumentName || "教材一覧の entries ボタンから表示してください。"}</p>
+        <h2>教材一覧</h2>
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>タイトル</th>
+                <th>ファイル</th>
+                <th>状態</th>
+                <th>作成日時</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {documents.map((document) => (
+                <tr key={document.document_id}>
+                  <td>{document.title}</td>
+                  <td className="break-anywhere">{document.filename}</td>
+                  <td>{document.status}</td>
+                  <td>{new Date(document.created_at).toLocaleString("ja-JP")}</td>
+                  <td>
+                    <button className="button secondary" onClick={() => extractSkill(document.document_id)} type="button">
+                      Document Skill 抽出
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        {documentSkillEntries.length ? (
-          <div className="stack">
-            {documentSkillEntries.map((entry) => (
-              <article className="card" key={entry.entry_id} style={{ padding: 14 }}>
-                <span className="tag">{entry.entry_type}</span>
-                <h3>{entry.title}</h3>
-                <p>{entry.content}</p>
-                <p className="muted">
-                  {entry.source_page ? `p.${entry.source_page}` : "ページ情報なし"} {entry.source_span ? `/ ${entry.source_span}` : ""}
-                </p>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">表示中の Document Skill entries はありません。</p>
-        )}
       </section>
 
-      <section className="card stack">
-        <div>
-          <h2>スキル履歴</h2>
-          <p className="muted">ユーザーごとのリビジョンを確認し、必要に応じて最新の選択結果から再計算します。</p>
-        </div>
-        <form className="grid-2" onSubmit={handleLoadHistory}>
-          <label className="field">
-            <span>ユーザーID</span>
-            <input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="学習者の user_id を入力" />
-          </label>
-          <div style={{ alignSelf: "end", display: "flex", gap: 12 }}>
-            <button className="button secondary" onClick={handleRecompute} type="button">
-              スキルを再計算
-            </button>
-            <button className="button" type="submit">
-              履歴を読み込む
-            </button>
-          </div>
-        </form>
-        {skillHistory ? (
-          <div className="stack">
-            {skillHistory.revisions.map((revision) => (
-              <article className="card" key={revision.revision_id} style={{ padding: 16 }}>
-                <p className="muted">リビジョン {revision.revision_number}</p>
-                <strong>{revision.summary_rule}</strong>
-                <p>{revision.update_reason}</p>
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(revision.profile_json, null, 2)}</pre>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">まだ履歴は読み込まれていません。</p>
-        )}
-      </section>
+      <form className="card stack" onSubmit={exportRun}>
+        <h2>CSV export</h2>
+        <p className="muted">run_id を指定して、runs / assessments / attempts / materials / skills / generation_logs / results を zip 用に生成します。</p>
+        <label className="field">
+          <span>run_id</span>
+          <input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="被験者画面の run_id" />
+        </label>
+        <button className="button" disabled={!runId} type="submit">export 作成</button>
+        {exportJob ? (
+          <p className="muted">export_job_id: {exportJob.export_job_id} / status: {exportJob.status} / path: {exportJob.file_path}</p>
+        ) : null}
+      </form>
     </div>
   );
 }

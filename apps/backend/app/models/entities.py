@@ -275,10 +275,18 @@ class ExperimentRun(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
-    chat_message_id: Mapped[str] = mapped_column(ForeignKey("chat_messages.id"))
-    condition_name: Mapped[str] = mapped_column(String(100))
-    skills_enabled: Mapped[bool] = mapped_column(Boolean)
-    candidate_count: Mapped[int] = mapped_column(Integer)
+    document_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    document_skill_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    state: Mapped[str] = mapped_column(String(50), default="RUN_STARTED")
+    cycle_count: Mapped[int] = mapped_column(Integer, default=10)
+    current_cycle_index: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Legacy chat experiment fields. New adaptive runtime does not use these.
+    chat_message_id: Mapped[str | None] = mapped_column(ForeignKey("chat_messages.id"), nullable=True)
+    condition_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    skills_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    candidate_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -389,3 +397,201 @@ class StudyChatTurn(Base):
     question_text: Mapped[str] = mapped_column(Text)
     answer_text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# --- Adaptive learning MVP entities (Agent Skills, no runtime RAG) ---
+
+
+class SourceDocument(Base):
+    __tablename__ = "source_documents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    title: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(50), default="uploaded")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AdaptiveDocumentSkillRevision(Base):
+    __tablename__ = "adaptive_document_skill_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("source_documents.id"))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    skill_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    extraction_prompt_version: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))
+    schema_version: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AdaptiveDocumentSkillEntry(Base):
+    __tablename__ = "adaptive_document_skill_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    document_skill_revision_id: Mapped[str] = mapped_column(ForeignKey("adaptive_document_skill_revisions.id"))
+    entry_type: Mapped[str] = mapped_column(String(50))
+    topic_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    content_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    difficulty: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GeneratedAssessment(Base):
+    __tablename__ = "generated_assessments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"))
+    assessment_type: Mapped[str] = mapped_column(String(20))
+    cycle_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    questions_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    blueprint_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    question_fingerprints_json: Mapped[list] = mapped_column(JSON, default=list)
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    temperature: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssessmentItem(Base):
+    __tablename__ = "assessment_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    assessment_id: Mapped[str] = mapped_column(ForeignKey("generated_assessments.id"))
+    question_id: Mapped[str] = mapped_column(String(100))
+    item_index: Mapped[int] = mapped_column(Integer)
+    topic: Mapped[str] = mapped_column(String(255))
+    subtopic: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    difficulty: Mapped[str] = mapped_column(String(50))
+    stem: Mapped[str] = mapped_column(Text)
+    choices_json: Mapped[list] = mapped_column(JSON, default=list)
+    correct_answer: Mapped[str] = mapped_column(Text)
+    rubric: Mapped[str] = mapped_column(Text)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AssessmentAttempt(Base):
+    __tablename__ = "assessment_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    assessment_id: Mapped[str] = mapped_column(ForeignKey("generated_assessments.id"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    answers_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    per_question_correct_json: Mapped[list] = mapped_column(JSON, default=list)
+    analysis_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GeneratedMaterial(Base):
+    __tablename__ = "generated_materials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"))
+    cycle_index: Mapped[int] = mapped_column(Integer)
+    learner_skill_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    content_markdown: Mapped[str] = mapped_column(Text)
+    focus_topics_json: Mapped[list] = mapped_column(JSON, default=list)
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    temperature: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MaterialRead(Base):
+    __tablename__ = "material_reads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    material_id: Mapped[str] = mapped_column(ForeignKey("generated_materials.id"))
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"))
+    cycle_index: Mapped[int] = mapped_column(Integer)
+    presented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    read_confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    read_duration_seconds: Mapped[int] = mapped_column(Integer)
+
+
+class LearnerSkillRevision(Base):
+    __tablename__ = "learner_skill_revisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    revision: Mapped[int] = mapped_column(Integer)
+    source_attempt_id: Mapped[str | None] = mapped_column(ForeignKey("assessment_attempts.id"), nullable=True)
+    skill_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    update_reason: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GenerationLog(Base):
+    __tablename__ = "generation_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("experiment_runs.id"), nullable=True)
+    generation_type: Mapped[str] = mapped_column(String(100))
+    input_summary_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    validation_status: Mapped[str] = mapped_column(String(50))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))
+    prompt_version: Mapped[str] = mapped_column(String(100))
+    temperature: Mapped[float] = mapped_column(Float)
+    input_schema_version: Mapped[str] = mapped_column(String(100), default="v1")
+    output_schema_version: Mapped[str] = mapped_column(String(100), default="v1")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResultSummary(Base):
+    __tablename__ = "result_summaries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("experiment_runs.id"), unique=True)
+    initial_score: Mapped[int] = mapped_column(Integer)
+    final_score: Mapped[int] = mapped_column(Integer)
+    gain_score: Mapped[int] = mapped_column(Integer)
+    gain_rate: Mapped[float] = mapped_column(Float)
+    initial_accuracy: Mapped[float] = mapped_column(Float)
+    final_accuracy: Mapped[float] = mapped_column(Float)
+    accuracy_gain: Mapped[float] = mapped_column(Float)
+    cycle_score_trend: Mapped[list] = mapped_column(JSON, default=list)
+    topic_mastery_before_after: Mapped[dict] = mapped_column(JSON, default=dict)
+    improved_topics: Mapped[list] = mapped_column(JSON, default=list)
+    remaining_weak_topics: Mapped[list] = mapped_column(JSON, default=list)
+    misconception_reduction: Mapped[dict] = mapped_column(JSON, default=dict)
+    material_read_duration_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    test_duration_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    ai_summary: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ExportJob(Base):
+    __tablename__ = "export_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_id)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("experiment_runs.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,188 +1,29 @@
-# Learning Skill Accumulation Chatbot
+# Agent Skills Adaptive Learning App
 
-研究用プロトタイプとして、学習者の回答選択と主観評価をもとにユーザー別 `Skill` を更新し、次回以降の回答生成に反映するローカル実行前提のチュータリングチャットボットです。
+PDF 教材を Document Agent Skill に変換し、被験者のテスト結果から Learner Agent Skill を更新しながら、10 サイクルの教材生成・テスト・最終評価を行う研究用 Web アプリです。
 
-## Repo Structure
-- `apps/backend`: FastAPI API, SQLAlchemy models, Alembic migrations, Document Skill extraction, generation provider abstraction, export logic
-- `apps/frontend`: Next.js App Router UI for chat, logs, and admin workflows
-- `apps/worker`: PostgreSQL polling worker for ingestion and skill-update jobs
-- `packages/shared-schemas`: OpenAPI 由来の共有型を置くための予約領域
-- `seeds/sample_corpus`: サンプル教材
-- `docs`: 要件、アーキテクチャ、評価プロトコル
+新 runtime path では RAG、embedding-based retrieval、pgvector similarity search、runtime chunk retrieval を使いません。既存の chat / RAG / 3候補回答選択関連コードと legacy テーブルは後方互換用に残っていますが、Agent Skills 型実験フローからは参照しません。
 
-## Implemented Scope
-- Docker Compose ベースの monorepo 構成
-- PostgreSQL + pgvector 前提の初期スキーマ
-- 文書 upload と ingest job 作成
-- 教材 upload と Document Skill extraction worker 処理
-- 質問送信時の Document Skill context + 3候補生成
-- 候補選択、満足度・わかりやすさ・コメント保存
-- chosen / non-chosen を使う `SkillUpdater`
-- `skills_enabled` ON/OFF 実験ログ保存
-- `turns.csv`、`candidates.csv`、`feedback.csv`、`skill_revisions.csv`、`document_skill_revisions.csv`、`document_skill_entries.csv`、`document_skill_usage_logs.csv` を含む `logs.zip` export
-- Chat / Logs / Admin の最低限 UI
-- ユーザー名/パスワード登録、ログイン、HttpOnly Cookie セッション
-
-## Tech Stack
+## Stack
 - Backend: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy 2.x, Alembic
 - Frontend: Next.js 15, TypeScript
-- Database: PostgreSQL 16, pgvector
-- Worker: Python polling worker
-- Default generation provider: Gemini Developer API
-- Legacy embedding provider: local `sentence-transformers`。新規 runtime 生成経路では embedding / vector retrieval を使いません。
-- Test/dev fallback providers: `mock`
+- DB: PostgreSQL 16 + pgvector
+- Worker: Python polling worker（legacy ingestion / skill-update 用）
+- Default generation provider: Ollama `gemma4:e2b`
+- Test provider: `mock`
 
-## Environment Setup
-1. `.env` を用意します。
+## Setup
 ```bash
 cp .env.example .env
 ```
-2. Gemini で回答生成する場合は `.env` の `GEMINI_API_KEY` を設定します。
-3. Mac host の Ollama で回答生成する場合は、host 側で Ollama を起動し、`.env` に `GENERATION_PROVIDER=ollama` と `LLM_PROVIDER=ollama` を設定します。
-4. API キーなしでローカル挙動だけ確認したい場合は `.env` の `GENERATION_PROVIDER=mock` と `EMBEDDING_PROVIDER=mock` を使ってください。
-5. 新規 ingestion は教材を Document Skill entries に変換します。legacy RAG embedding 設定は後方互換・比較用に残しています。
 
-主な環境変数:
-- `DATABASE_URL`
-- `GENERATION_PROVIDER`
-- `EMBEDDING_PROVIDER`
-- `GEMINI_API_KEY`
-- `GEMINI_MODEL_GENERATE`
-- `GEMINI_MODEL_EMBED`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_MODEL_GENERATE`
-- `OLLAMA_REQUEST_TIMEOUT_SECONDS`
-- `LOCAL_EMBED_MODEL`
-- `LOCAL_EMBED_DEVICE`
-- `EMBEDDING_DIMENSIONS`
-- `MIN_RETRIEVAL_SCORE`
-- `DOCUMENT_SKILL_CONTEXT_MAX_CHARS`
-- `DOCUMENT_SKILL_MAX_ENTRIES`
-- `DOCUMENT_SKILL_INCLUDE_SOURCE_EXCERPTS`
-- `HF_HOME`
-- `SENTENCE_TRANSFORMERS_HOME`
-- `UPLOAD_DIR`
-- `EXPORT_DIR`
-- `NEXT_PUBLIC_API_BASE_URL`
-- `AUTH_COOKIE_NAME`
-- `AUTH_COOKIE_SECURE`
-- `AUTH_SESSION_DAYS`
+Ollama を使う場合は macOS host 側で起動します。
 
-## Run With Docker Compose
-通常起動:
 ```bash
-docker compose up --build
+ollama pull gemma4:e2b
 ```
 
-開発向けオーバーレイ:
-```bash
-docker compose -f compose.yaml -f compose.dev.yaml up --build
-```
-
-研究再現向けオーバーレイ:
-```bash
-docker compose -f compose.yaml -f compose.research.yaml up --build
-```
-
-想定ポート:
-- Frontend: `http://localhost:3000`
-- Backend / OpenAPI: `http://localhost:8000`
-- PostgreSQL: `localhost:5432`
-- pgAdmin: `http://localhost:5050` (`compose.dev.yaml` 使用時)
-
-## Minimal Workflow
-1. Chat UI の利用前に `/register` で新規登録するか `/login` でログインする
-2. Admin 画面から教材を upload し、ingest job を作成する
-3. worker が Document Skill extraction を実行し、entries を保存する
-4. Chat 画面で参照対象教材を選び、3候補を受け取る
-5. 候補を1つ選択して満足度・わかりやすさ・コメントを送る
-6. worker が `skill_update_job` を処理し、新 revision を保存する
-7. 次回生成時に `skills_enabled=true` なら最新 skill を prompt に反映する
-
-## Key API Endpoints
-- `GET /health`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `POST /api/auth/logout`
-- `POST /api/users`
-- `GET /api/users/{user_id}`
-- `GET /api/users/{user_id}/skills`
-- `POST /api/documents/upload`
-- `POST /api/documents/{document_id}/ingest`
-- `GET /api/documents`
-- `GET /api/documents/{document_id}/chunks`
-- `GET /api/documents/{document_id}/skill`
-- `GET /api/documents/{document_id}/skill/revisions`
-- `GET /api/documents/{document_id}/skill/entries`
-- `POST /api/chat/generate`
-- `POST /api/chat/select`
-- `GET /api/chat/sessions/{session_id}`
-- `GET /api/chat/logs/{user_id}`
-- `GET /api/chat/turns/{chat_message_id}`
-- `POST /api/admin/skills/recompute/{user_id}`
-- `GET /api/admin/skills/history/{user_id}`
-- `POST /api/experiments/runs`
-- `GET /api/experiments/runs`
-- `GET /api/experiments/runs/{run_id}`
-- `GET /api/experiments/exports/logs.zip`
-
-## Login And Chat Access
-Chat 画面と `/api/chat/generate`、`/api/chat/select` はログイン済みユーザーのみ利用できます。認証は `username + password` と HttpOnly Cookie の opaque session token で行います。
-
-```env
-AUTH_COOKIE_NAME=tutorbot_session
-AUTH_COOKIE_SECURE=false
-AUTH_SESSION_DAYS=7
-```
-
-研究用ローカル環境では `AUTH_COOKIE_SECURE=false` が既定です。HTTPS 前提の環境で使う場合は `AUTH_COOKIE_SECURE=true` にしてください。`Admin` と `Logs` は研究運用を壊さないため、現時点ではログイン必須にしていません。
-
-既存の匿名 `POST /api/users` は互換用に残していますが、Chat UI からは使いません。過去の匿名ユーザーデータは保持されますが、匿名ユーザーを後からログインアカウントへ紐づける移行 UI はありません。
-
-## Seed Data
-サンプル教材:
-- [algebra_intro.md](/Users/hiroki/bot_experiment/seeds/sample_corpus/algebra_intro.md)
-
-サンプル user seed:
-```bash
-docker compose run --rm backend python -m app.scripts.seed_sample_data
-```
-
-## Document Skills And Legacy Embeddings
-現在の回答生成は runtime RAG ではなく、ingestion 時に抽出した Document Skill entries を deterministic に選び、prompt に渡します。`skills_enabled` はユーザー別 Preference Skill の ON/OFF、`document_skills_enabled` は Document Skill context の ON/OFF です。
-
-Document Skill の context budget:
-
-```env
-DOCUMENT_SKILL_CONTEXT_MAX_CHARS=12000
-DOCUMENT_SKILL_MAX_ENTRIES=80
-DOCUMENT_SKILL_INCLUDE_SOURCE_EXCERPTS=true
-```
-
-`rag_document_chunks`、`embeddings`、`retrieval_logs`、pgvector 関連のコードは legacy として残しています。新規 upload / ingest / chat では embedding / vector retrieval を呼びません。後方互換・比較用の既定は以下です。
-
-```env
-GENERATION_PROVIDER=gemini
-EMBEDDING_PROVIDER=local-sentence-transformers
-LOCAL_EMBED_MODEL=pkshatech/GLuCoSE-base-ja
-LOCAL_EMBED_DEVICE=auto
-EMBEDDING_DIMENSIONS=768
-```
-
-Docker Compose 内では CPU fallback を前提にします。Apple Silicon の MPS を使いたい場合、Linux container から直接 MPS を使う前提にはせず、将来用の `EMBEDDING_PROVIDER=local-http` で macOS host 側の embedding service を呼ぶ設計です。
-
-legacy embedding モデルを事前取得したい場合:
-```bash
-docker compose run --rm worker python -m app.scripts.prefetch_embedding_model
-```
-
-既存の legacy vector は Document Skill 経路では使われません。教材を更新した場合は対象 document の ingest job を再実行し、新しい Document Skill revision を作成してください。
-
-Chat 画面では参照対象教材を選択できます。初期状態では直近の uploaded かつ completed の教材が選択されます。未選択の場合、`source_type=seed` の教材を除外し、uploaded 教材全体の Document Skill entries を参照します。seed 教材を使いたい場合は明示的に選択してください。
-
-## Ollama Generation
-回答生成、SkillUpdater、Document Skill extraction は `GENERATION_PROVIDER=ollama` で Mac host 側の Ollama に切り替えられます。runtime embedding は使用しません。
+`.env` の主な設定:
 
 ```env
 GENERATION_PROVIDER=ollama
@@ -190,56 +31,109 @@ LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://host.docker.internal:11434
 OLLAMA_MODEL_GENERATE=gemma4:e2b
 OLLAMA_REQUEST_TIMEOUT_SECONDS=120
-EMBEDDING_PROVIDER=local-sentence-transformers # legacy / comparison only
 ```
 
-Ollama は Docker container 内ではなく macOS host 側で起動します。backend container からは Docker Desktop の `host.docker.internal:11434` 経由で接続します。
+Ollama なしで E2E を確認する場合:
 
-事前確認:
+```env
+GENERATION_PROVIDER=mock
+LLM_PROVIDER=mock
+```
+
+## Run
 ```bash
-ollama pull gemma4:e2b
-curl http://localhost:11434/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gemma4:e2b","messages":[{"role":"user","content":"JSONで {\"ok\": true} だけ返してください"}],"stream":false,"format":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}}'
-docker compose exec backend python -c "import httpx; print(httpx.get('http://host.docker.internal:11434/api/tags').status_code)"
+docker compose up --build
 ```
 
-`.env` を Ollama 設定にした後、`docker compose up --build` で起動し、PDF の Document Skill extraction 完了後に Chat で質問して3候補が返ることを確認してください。Ollama が未起動、モデル未取得、または JSON schema に合わない応答を返した場合、`/api/chat/generate` は 502 を返します。
-初回モデルロードや長い回答で時間がかかる場合は、`OLLAMA_REQUEST_TIMEOUT_SECONDS` を増やしてください。
+開発時:
 
-失敗または途中停止した ingest を再試行したい場合は、対象 document の状態と job 状態を `pending` に戻します。
-
-```sql
-UPDATE rag_documents
-SET ingest_status = 'pending'
-WHERE id = '<document_id>';
-
-UPDATE ingestion_jobs
-SET status = 'pending',
-    error_message = NULL,
-    updated_at = now()
-WHERE document_id = '<document_id>'
-  AND status IN ('failed', 'running');
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-document 全体を一括で再試行する場合:
+URLs:
+- Frontend: `http://localhost:3000`
+- Backend OpenAPI: `http://localhost:8000/docs`
+- pgAdmin: `http://localhost:5050`（dev compose）
 
-```sql
-UPDATE rag_documents
-SET ingest_status = 'pending'
-WHERE ingest_status IN ('failed', 'running');
+## Experiment Flow
+1. `/register` で被験者ユーザーを作成する。
+2. `/admin` で PDF / md / txt 教材を upload する。
+3. `/admin` で `Document Skill 抽出` を実行し、教材を `ready` にする。
+4. `/` で ready な教材を選び、10 サイクル run を開始する。
+5. 初回テストを生成・回答・提出する。
+6. Cycle 1〜10 で教材生成、読了記録、Cycle テスト生成、回答・提出を順に行う。
+7. Cycle 10 提出後、最終テストを生成・回答・提出する。
+8. 結果画面で initial / final score、gain、cycle trend、AI 総評を確認する。
+9. `/admin` で run_id を指定して CSV export を作成する。
 
-UPDATE ingestion_jobs
-SET status = 'pending',
-    error_message = NULL,
-    updated_at = now()
-WHERE status IN ('failed', 'running');
+順序外 API 呼び出しは `409 Conflict` を返します。
+
+## New Adaptive APIs
+- `POST /api/admin/documents/upload`
+- `GET /api/admin/documents`
+- `POST /api/admin/documents/{document_id}/extract-skill`
+- `POST /api/runs/start`
+- `GET /api/runs/{run_id}/state`
+- `POST /api/runs/{run_id}/initial-test/generate`
+- `GET /api/runs/{run_id}/initial-test`
+- `POST /api/runs/{run_id}/initial-test/submit`
+- `POST /api/runs/{run_id}/cycles/{cycle_index}/material/generate`
+- `GET /api/runs/{run_id}/cycles/{cycle_index}/material`
+- `POST /api/runs/{run_id}/cycles/{cycle_index}/material/read-confirm`
+- `POST /api/runs/{run_id}/cycles/{cycle_index}/test/generate`
+- `GET /api/runs/{run_id}/cycles/{cycle_index}/test`
+- `POST /api/runs/{run_id}/cycles/{cycle_index}/test/submit`
+- `POST /api/runs/{run_id}/final-test/generate`
+- `GET /api/runs/{run_id}/final-test`
+- `POST /api/runs/{run_id}/final-test/submit`
+- `GET /api/runs/{run_id}/results`
+- `POST /api/admin/exports/runs/{run_id}`
+- `GET /api/admin/exports/{export_job_id}`
+
+## DB Schema
+New adaptive runtime tables:
+- `source_documents`
+- `adaptive_document_skill_revisions`
+- `adaptive_document_skill_entries`
+- `experiment_runs`
+- `generated_assessments`
+- `assessment_items`
+- `assessment_attempts`
+- `generated_materials`
+- `material_reads`
+- `learner_skill_revisions`
+- `generation_logs`
+- `result_summaries`
+- `export_jobs`
+
+`rag_documents`、`rag_document_chunks`、`embeddings`、`retrieval_logs`、chat 系テーブルは legacy です。新 adaptive API からは呼びません。
+
+## CSV Export
+`POST /api/admin/exports/runs/{run_id}` は zip を作成し、以下の CSV を含めます。
+
+- `runs.csv`
+- `source_documents.csv`
+- `document_skill_revisions.csv`
+- `document_skill_entries.csv`
+- `generated_assessments.csv`
+- `assessment_items.csv`
+- `assessment_attempts.csv`
+- `generated_materials.csv`
+- `material_reads.csv`
+- `learner_skill_revisions.csv`
+- `generation_logs.csv`
+- `result_summaries.csv`
+
+## Tests
+Backend:
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml run --rm backend python -m pytest app/tests -q
 ```
 
-Admin 画面から教材を削除すると、対象の `document_skills`、`document_skill_revisions`、`document_skill_entries`、`document_skill_usage_logs`、`ingestion_jobs`、legacy `rag_document_chunks` / `embeddings` / `retrieval_logs`、`rag_documents`、保存済みファイル本体を hard delete します。実験本番後に削除すると、過去の Document Skill usage logs や評価データの解釈に影響するため注意してください。研究ログを保持したい段階では、削除前に export を取得するか、将来的な soft delete 化を検討してください。
+Frontend:
 
-## Tests And Checks
-frontend:
 ```bash
 cd apps/frontend
 npm install
@@ -247,21 +141,11 @@ npm run lint
 npm run build
 ```
 
-backend tests は Docker コンテナ内の Python 3.12 実行を想定しています:
+Migration:
+
 ```bash
-docker compose run --rm backend pytest app/tests -q
+docker compose -f compose.yaml -f compose.dev.yaml run --rm backend alembic upgrade head
 ```
 
-## Notes
-- `GeminiGenerationProvider` は Google AI Developer API の `generateContent` を使う実装です。
-- `OllamaGenerationProvider` は Mac host 側 Ollama の `/api/chat` を使い、`stream=false` と JSON schema `format` で構造化 JSON 応答を要求します。
-- `GeminiEmbeddingProvider` と legacy retrieval は後方互換・比較用に残していますが、新規 runtime 生成経路では使いません。
-- `MockGenerationProvider` と `MockEmbeddingProvider` は API キーなしで縦スライスを確認するための決定的なテスト用実装です。
-- skill 更新は `LLM で差分抽出` と `アプリ側の deterministic merge` を分けています。
-- export は単一 CSV ではなく、研究評価向けの複数 CSV を zip 化しています。
-
-## Current Verification Status
-- `python3 -m compileall apps/backend/app apps/worker/app`: 実行済み
-- `docker compose config`: 実行済み
-- `cd apps/frontend && npm run lint && npm run build`: 実行済み
-- `docker compose up --build` と backend `pytest`: この実行環境では Docker デーモン停止中のため未実行
+## Legacy Notes
+旧 chat UI、3候補回答、answer selection、legacy RAG ingestion/retrieval、pgvector similarity search は残っています。新仕様の被験者 flow / admin flow / generation path では、教材参照は Document Agent Skill、学習者状態は Learner Agent Skill のみを使います。
