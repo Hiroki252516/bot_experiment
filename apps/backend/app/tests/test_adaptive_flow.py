@@ -26,7 +26,13 @@ def test_adaptive_e2e_flow_without_runtime_retrieval(client, session) -> None:
     upload = client.post(
         "/api/admin/documents/upload",
         data={"title": "代数教材"},
-        files={"file": ("algebra.txt", BytesIO("一次方程式と二次方程式を学ぶ教材です。".encode()), "text/plain")},
+        files={
+            "file": (
+                "algebra.txt",
+                BytesIO(("一次方程式と二次方程式を学ぶ教材です。" * 20).encode()),
+                "text/plain",
+            )
+        },
     )
     assert upload.status_code == 200
     document_id = upload.json()["document_id"]
@@ -85,3 +91,17 @@ def test_adaptive_e2e_flow_without_runtime_retrieval(client, session) -> None:
     assert session.query(Embedding).count() == 0
     assert session.query(RetrievalLog).count() == 0
     assert session.query(GenerationLog).count() > 0
+
+
+def test_document_skill_extraction_rejects_unextractable_pdf_text(client) -> None:
+    upload = client.post(
+        "/api/admin/documents/upload",
+        data={"title": "空PDF相当"},
+        files={"file": ("empty.txt", BytesIO(b""), "text/plain")},
+    )
+    assert upload.status_code == 200
+    document_id = upload.json()["document_id"]
+
+    extract = client.post(f"/api/admin/documents/{document_id}/extract-skill")
+    assert extract.status_code == 422
+    assert "十分なテキスト" in extract.text

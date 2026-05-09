@@ -84,6 +84,16 @@ def extract_document_skill(session: Session, document_id: str) -> tuple[SourceDo
     session.commit()
 
     source_text = _extract_text(Path(document.file_path), document.mime_type)
+    if len(source_text.strip()) < 200:
+        document.status = "failed"
+        document.updated_at = utcnow()
+        session.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "PDFから十分なテキストを抽出できませんでした。OCR済みPDF、またはテキスト抽出可能なPDFをアップロードしてください。"
+            ),
+        )
     provider = get_generation_provider(get_settings())
     metadata = {
         "document_id": document.id,
@@ -94,6 +104,7 @@ def extract_document_skill(session: Session, document_id: str) -> tuple[SourceDo
     }
     try:
         skill, provider_meta = provider.extract_document_skill(metadata, source_text)
+        _validate_document_skill_is_grounded(skill, source_text)
         revision_number = _next_document_revision(session, document.id)
         skill.revision = revision_number
         skill.source_pdf_metadata = metadata
@@ -383,6 +394,27 @@ def _extract_text(path: Path, mime_type: str) -> str:
         reader = PdfReader(str(path))
         return "\n\n".join((page.extract_text() or "") for page in reader.pages).strip()
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _validate_document_skill_is_grounded(skill: DocumentSkillPayload, source_text: str) -> None:
+    serialized = json.dumps(skill.model_dump(mode="json"), ensure_ascii=False)
+    forbidden_markers = [
+        "PDFの内容から抽出された",
+        "主要な用語1",
+        "主要な用語2",
+        "概念X",
+        "概念Y",
+        "Term A",
+        "Term B",
+        "ここに",
+    ]
+    if any(marker in serialized for marker in forbidden_markers):
+        raise ValueError("Document Agent Skill contains placeholder/generic content")
+    source_compact = source_text.replace(" ", "")
+    grounded_terms = ["仮定法", "過去形", "過去完了", "would", "could", "might", "If"]
+    if any(term in source_compact or term in source_text for term in grounded_terms):
+        if "仮定" not in serialized and "would" not in serialized and "If" not in serialized:
+            raise ValueError("Document Agent Skill is not grounded in the uploaded grammar material")
 
 
 def _next_document_revision(session: Session, document_id: str) -> int:
