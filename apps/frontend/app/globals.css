@@ -78,6 +78,7 @@ select {
 }
 
 .card {
+  min-width: 0;
   background: rgba(255, 253, 248, 0.9);
   border: 1px solid var(--border);
   border-radius: 22px;
@@ -146,6 +147,10 @@ select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.grid-2 > * {
+  min-width: 0;
 }
 
 .grid-3 {
@@ -312,14 +317,47 @@ select {
 
 .table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 .table th,
 .table td {
   text-align: left;
+  vertical-align: top;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-documents-table {
+  min-width: 780px;
+}
+
+.admin-runs-table {
+  min-width: 520px;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-actions .button {
+  min-height: 38px;
+  padding: 8px 12px;
+}
+
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @media (max-width: 900px) {

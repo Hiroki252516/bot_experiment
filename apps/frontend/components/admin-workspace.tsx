@@ -221,64 +221,70 @@ export function AdminWorkspace() {
       <section className="grid-2">
         <div className="card stack">
           <h2>投入済み教材</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ファイル名</th>
-                <th>状態</th>
-                <th>Document Skill</th>
-                <th>entries</th>
-                <th>種類</th>
-                <th>由来</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((document) => (
-                <tr key={document.document_id}>
-                  <td>{document.filename}</td>
-                  <td>{document.ingest_status}</td>
-                  <td>
-                    {document.document_skill_status ?? "未作成"}
-                    {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
-                  </td>
-                  <td>{document.document_skill_entries_count}</td>
-                  <td>{document.mime_type}</td>
-                  <td>{document.source_type}</td>
-                  <td>
-                    <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
-                      entries
-                    </button>{" "}
-                    <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
-                      削除
-                    </button>
-                  </td>
+          <div className="table-scroll">
+            <table className="table admin-documents-table">
+              <thead>
+                <tr>
+                  <th>ファイル名</th>
+                  <th>状態</th>
+                  <th>Document Skill</th>
+                  <th>entries</th>
+                  <th>種類</th>
+                  <th>由来</th>
+                  <th>操作</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {documents.map((document) => (
+                  <tr key={document.document_id}>
+                    <td className="break-anywhere">{document.filename}</td>
+                    <td>{document.ingest_status}</td>
+                    <td>
+                      {document.document_skill_status ?? "未作成"}
+                      {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
+                    </td>
+                    <td>{document.document_skill_entries_count}</td>
+                    <td className="break-anywhere">{document.mime_type}</td>
+                    <td>{document.source_type}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
+                          entries
+                        </button>
+                        <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
+                          削除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card stack">
           <h2>実験ログ</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>条件</th>
-                <th>ユーザー</th>
-                <th>スキル</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run) => (
-                <tr key={run.run_id}>
-                  <td>{run.condition_name}</td>
-                  <td>{run.user_id}</td>
-                  <td>{String(run.skills_enabled)}</td>
+          <div className="table-scroll">
+            <table className="table admin-runs-table">
+              <thead>
+                <tr>
+                  <th>条件</th>
+                  <th>ユーザー</th>
+                  <th>スキル</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.run_id}>
+                    <td>{run.condition_name}</td>
+                    <td className="break-anywhere">{run.user_id}</td>
+                    <td>{String(run.skills_enabled)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

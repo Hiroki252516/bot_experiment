@@ -64,6 +64,18 @@ class GenerationProvider(ABC):
         cycle_index: int,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        raise NotImplementedError
+
+    def generate_assessment(
+        self,
+        assessment_type: str,
+        cycle_index: int | None,
+        material_text: str | None,
+        document_skill_context: dict,
+        skill_profile: dict,
+        skills_enabled: bool,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         raise NotImplementedError
 
@@ -73,6 +85,7 @@ class GenerationProvider(ABC):
         question_text: str,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         raise NotImplementedError
 
@@ -238,16 +251,19 @@ class MockGenerationProvider(GenerationProvider):
         cycle_index: int,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         notes = ", ".join(skill_profile.get("notes", [])) if skills_enabled else "skills disabled"
+        context = _document_skill_context_excerpt(document_skill_context or {})
         content_text = (
             f"# 教材（Cycle {cycle_index}）\n\n"
-            "この教材は学習サイクルのためのサンプルテキストです。\n\n"
+            "この教材はアップロード教材の内容をもとにした学習サイクル用テキストです。\n\n"
             f"- スキル反映: {notes}\n\n"
+            f"## アップロード教材からの要点\n\n{context}\n\n"
             "## 要点\n\n"
-            "1. 重要な概念を短く定義する\n"
-            "2. 具体例を1つ示す\n"
-            "3. よくある間違いを1つ示す\n"
+            "1. アップロード教材の重要事項を確認する\n"
+            "2. 具体例や提出条件を整理する\n"
+            "3. ミニテストで確認する観点を押さえる\n"
         )
         return (
             {
@@ -266,18 +282,60 @@ class MockGenerationProvider(GenerationProvider):
             ),
         )
 
+    def generate_assessment(
+        self,
+        assessment_type: str,
+        cycle_index: int | None,
+        material_text: str | None,
+        document_skill_context: dict,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        excerpt = _document_skill_context_excerpt(document_skill_context)
+        prefix = "Pre" if assessment_type == "pre_test" else "Post" if assessment_type == "post_test" else f"Mini{cycle_index}"
+        topic = (material_text or excerpt).replace("\n", " ")[:60] or "アップロード教材"
+        return (
+            {
+                "questions": [
+                    {
+                        "question_id": f"{prefix}_q1",
+                        "stem": f"アップロード教材に基づく確認です。次のうち教材内容に最も合うものはどれですか？（{topic}）",
+                        "choices": [excerpt[:120] or topic, "教材にない一般的な説明", "無関係な選択肢", "判断できない"],
+                        "correct_choice_index": 0,
+                    },
+                    {
+                        "question_id": f"{prefix}_q2",
+                        "stem": "教材を読むときに最も重視すべきことはどれですか？",
+                        "choices": ["教材に書かれた条件や手順を確認する", "教材と無関係な知識だけを暗記する", "問題文を読まずに選ぶ", "提出条件を無視する"],
+                        "correct_choice_index": 0,
+                    },
+                ]
+            },
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name="mock-model",
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response={"mode": "mock-assessment"},
+            ),
+        )
+
     def answer_question(
         self,
         material_text: str,
         question_text: str,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         notes = ", ".join(skill_profile.get("notes", [])) if skills_enabled else "skills disabled"
+        context = _document_skill_context_excerpt(document_skill_context or {})
         answer_text = (
             "教材の要点に沿って説明します。\n\n"
             f"- 質問: {question_text}\n"
             f"- スキル反映: {notes}\n\n"
+            f"## アップロード教材からの根拠\n\n{context}\n\n"
             "不明点があれば、教材のどの段落かを指定して追加で質問してください。"
         )
         return (
@@ -456,6 +514,7 @@ class GeminiGenerationProvider(GenerationProvider):
         cycle_index: int,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         schema = {
             "type": "OBJECT",
@@ -474,7 +533,33 @@ class GeminiGenerationProvider(GenerationProvider):
             f"サイクル: {cycle_index}\n"
             f"スキル適用の有無: {skills_enabled}\n"
             f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"アップロード教材のDocument Skill（JSON）: {json.dumps(document_skill_context or {}, ensure_ascii=False)}\n"
+            "教材本文は必ずアップロード教材の内容に基づいてください。一般論だけで書かないでください。\n"
         )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.gemini_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+    def generate_assessment(
+        self,
+        assessment_type: str,
+        cycle_index: int | None,
+        material_text: str | None,
+        document_skill_context: dict,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = _gemini_assessment_schema()
+        prompt = _study_assessment_prompt(assessment_type, cycle_index, material_text, document_skill_context, skill_profile, skills_enabled)
         result = self._generate_json(prompt, schema)
         return (
             result["parsed"],
@@ -494,6 +579,7 @@ class GeminiGenerationProvider(GenerationProvider):
         question_text: str,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         schema = {"type": "OBJECT", "properties": {"answer_text": {"type": "STRING"}}, "required": ["answer_text"]}
         prompt = (
@@ -502,6 +588,7 @@ class GeminiGenerationProvider(GenerationProvider):
             "出力は必ず JSON で、指定スキーマに従ってください。\n"
             f"スキル適用の有無: {skills_enabled}\n"
             f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"アップロード教材のDocument Skill（JSON）: {json.dumps(document_skill_context or {}, ensure_ascii=False)}\n"
             f"教材本文:\n{material_text}\n\n"
             f"学習者の質問: {question_text}\n"
         )
@@ -714,6 +801,7 @@ class OllamaGenerationProvider(GenerationProvider):
         cycle_index: int,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         schema = {
             "type": "object",
@@ -731,7 +819,33 @@ class OllamaGenerationProvider(GenerationProvider):
             f"サイクル: {cycle_index}\n"
             f"スキル適用の有無: {skills_enabled}\n"
             f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"アップロード教材のDocument Skill（JSON）: {json.dumps(document_skill_context or {}, ensure_ascii=False)}\n"
+            "教材本文は必ずアップロード教材の内容に基づいてください。一般論だけで書かないでください。\n"
         )
+        result = self._generate_json(prompt, schema)
+        return (
+            result["parsed"],
+            ProviderMetadata(
+                provider_name=self.provider_name,
+                model_name=self.settings.ollama_model_generate,
+                temperature=self.settings.generation_temperature,
+                top_p=self.settings.generation_top_p,
+                prompt_version=self.settings.prompt_version,
+                raw_response=result["raw"],
+            ),
+        )
+
+    def generate_assessment(
+        self,
+        assessment_type: str,
+        cycle_index: int | None,
+        material_text: str | None,
+        document_skill_context: dict,
+        skill_profile: dict,
+        skills_enabled: bool,
+    ) -> tuple[dict[str, Any], ProviderMetadata]:
+        schema = _ollama_assessment_schema()
+        prompt = _study_assessment_prompt(assessment_type, cycle_index, material_text, document_skill_context, skill_profile, skills_enabled)
         result = self._generate_json(prompt, schema)
         return (
             result["parsed"],
@@ -751,6 +865,7 @@ class OllamaGenerationProvider(GenerationProvider):
         question_text: str,
         skill_profile: dict,
         skills_enabled: bool,
+        document_skill_context: dict | None = None,
     ) -> tuple[dict[str, Any], ProviderMetadata]:
         schema = {"type": "object", "properties": {"answer_text": {"type": "string"}}, "required": ["answer_text"]}
         prompt = (
@@ -758,6 +873,7 @@ class OllamaGenerationProvider(GenerationProvider):
             "出力は必ず JSON で、指定スキーマに従ってください。\n"
             f"スキル適用の有無: {skills_enabled}\n"
             f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"アップロード教材のDocument Skill（JSON）: {json.dumps(document_skill_context or {}, ensure_ascii=False)}\n"
             f"教材本文:\n{material_text}\n\n"
             f"学習者の質問: {question_text}\n"
         )
@@ -785,6 +901,95 @@ def _document_skill_prompt(document_metadata: dict, source_unit: dict, previous_
         f"Previous Document Skill JSON: {json.dumps(previous_document_skill, ensure_ascii=False)}\n"
         f"Source unit JSON: {json.dumps(source_unit, ensure_ascii=False)}\n"
     )
+
+
+def _document_skill_context_excerpt(document_skill_context: dict, *, max_chars: int = 900) -> str:
+    lines: list[str] = []
+    for document in document_skill_context.get("documents", []):
+        filename = document.get("filename", "uploaded material")
+        for entry in document.get("entries", []):
+            title = entry.get("title") or entry.get("entry_type") or "entry"
+            content = str(entry.get("content", "")).strip()
+            if content:
+                lines.append(f"- {filename}: {title}: {content}")
+    excerpt = "\n".join(lines).strip()
+    return excerpt[:max_chars] if excerpt else "アップロード教材の抽出済み要点がありません。"
+
+
+def _study_assessment_prompt(
+    assessment_type: str,
+    cycle_index: int | None,
+    material_text: str | None,
+    document_skill_context: dict,
+    skill_profile: dict,
+    skills_enabled: bool,
+) -> str:
+    if assessment_type == "pre_test":
+        purpose = "アップロード教材全体の基礎理解を測る初回テスト"
+    elif assessment_type == "post_test":
+        purpose = "アップロード教材全体の理解到達度を測る最終テスト"
+    else:
+        purpose = f"Cycle {cycle_index} の教材本文に基づくミニテスト"
+    return (
+        "あなたは学習支援システムのMCQテストを生成するAIです。\n"
+        "出力は必ずJSONで、指定スキーマに従ってください。Markdownや説明文はJSON外に書かないでください。\n"
+        "各設問はアップロード教材または提示教材の内容から作り、一般論だけの問題にしないでください。\n"
+        "correct_choice_index は0始まりで、必ず正解の選択肢を指してください。\n"
+        f"テスト種別: {assessment_type}\n"
+        f"目的: {purpose}\n"
+        f"cycle_index: {cycle_index}\n"
+        f"スキル適用の有無: {skills_enabled}\n"
+        f"学習者スキル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+        f"提示教材本文: {material_text or ''}\n"
+        f"アップロード教材のDocument Skill（JSON）: {json.dumps(document_skill_context, ensure_ascii=False)}\n"
+        "2問のMCQを生成してください。choicesは4択にしてください。"
+    )
+
+
+def _gemini_assessment_schema() -> dict[str, Any]:
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "questions": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "question_id": {"type": "STRING"},
+                        "stem": {"type": "STRING"},
+                        "choices": {"type": "ARRAY", "items": {"type": "STRING"}},
+                        "correct_choice_index": {"type": "INTEGER"},
+                    },
+                    "required": ["question_id", "stem", "choices", "correct_choice_index"],
+                },
+            }
+        },
+        "required": ["questions"],
+    }
+
+
+def _ollama_assessment_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question_id": {"type": "string"},
+                        "stem": {"type": "string"},
+                        "choices": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "string"}},
+                        "correct_choice_index": {"type": "integer"},
+                    },
+                    "required": ["question_id", "stem", "choices", "correct_choice_index"],
+                },
+            }
+        },
+        "required": ["questions"],
+    }
 
 
 def _gemini_document_skill_delta_schema() -> dict[str, Any]:
