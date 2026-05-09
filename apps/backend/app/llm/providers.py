@@ -11,13 +11,14 @@ from app.schemas.llm import GeneratedCandidateSet, ProviderMetadata, SkillDelta
 
 
 CANDIDATE_MARKDOWN_INSTRUCTIONS = (
-    "Keep title as short plain text. Do not put Markdown heading markers such as ## in title.\n"
-    "For every candidate, write answer_text as learner-facing Markdown.\n"
-    "Use short sections with headings such as '## 概要', '## 要点', '## 手順' or '## 注意点'.\n"
-    "Use blank lines between sections, and use bullet lists or numbered lists for details.\n"
-    "Do not write answer_text as one long paragraph.\n"
-    "Organize retrieved material into readable chunks, while keeping each candidate's explanation style distinct.\n"
-    "Do not wrap the whole answer_text in a markdown code fence.\n"
+    "タイトルはプレーンテキストで短く記述してください（## などのMarkdown見出し記号は含めない）。\n"
+    "回答（answer_text）は、学習者向けのMarkdown形式で、日本語で記述してください。\n"
+    "各回答は500文字程度の十分な情報量を持たせてください。\n"
+    "回答は '## 概要', '## 要点', '## 手順', '## 注意点' などの見出しを使用して、適切にセクション分けしてください。\n"
+    "セクション間には空行を入れ、詳細は箇条書き（弾丸リストや番号付きリスト）を活用してください。\n"
+    "一つの長い段落として記述しないでください。\n"
+    "検索された資料の内容を整理して分かりやすく説明しつつ、各候補で異なる説明スタイル（導入重視、具体例重視、要約重視など）を維持してください。\n"
+    "回答全体を Markdown のコードフェンス（```）で囲まないでください。\n"
 )
 
 
@@ -203,14 +204,15 @@ class GeminiGenerationProvider(GenerationProvider):
             "required": ["candidates"],
         }
         prompt = (
-            "You are generating tutoring answer candidates for a research system.\n"
+            "あなたは教育支援システムの回答候補を生成するAIです。\n"
+            "必ず日本語で回答してください。\n"
             f"{CANDIDATE_MARKDOWN_INSTRUCTIONS}"
-            f"Question: {question}\n"
-            f"Candidate count: {candidate_count}\n"
-            f"Skills enabled: {skills_enabled}\n"
-            f"Current skill profile JSON: {json.dumps(skill_profile, ensure_ascii=False)}\n"
-            f"Retrieved contexts JSON: {json.dumps(retrievals, ensure_ascii=False)}\n"
-            "Return exactly the requested number of distinct learner-facing candidates."
+            f"質問: {question}\n"
+            f"候補数: {candidate_count}\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"現在のスキルプロファイル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"検索された学習資料（JSON）: {json.dumps(retrievals, ensure_ascii=False)}\n"
+            "指定された数だけ、学習者にとって有益で質の高い、日本語の回答候補を生成してください。"
         )
         last_error: Exception | None = None
         for _ in range(2):
@@ -345,16 +347,17 @@ class OllamaGenerationProvider(GenerationProvider):
             "required": ["candidates"],
         }
         prompt = (
-            "You are generating tutoring answer candidates for a research system.\n"
-            "Return only JSON that matches the provided schema. Do not include markdown or commentary.\n"
-            "The JSON object itself must not be markdown, but each candidate.answer_text must be Markdown text.\n"
-            f"{CANDIDATE_MARKDOWN_INSTRUCTIONS}"
-            f"Question: {question}\n"
-            f"Candidate count: {candidate_count}\n"
-            f"Skills enabled: {skills_enabled}\n"
-            f"Current skill profile JSON: {json.dumps(skill_profile, ensure_ascii=False)}\n"
-            f"Retrieved contexts JSON: {json.dumps(retrievals, ensure_ascii=False)}\n"
-            "Return exactly the requested number of distinct learner-facing candidates."
+            "あなたは教育支援システムの回答候補を生成するAIです。\n"
+            "必ず日本語で回答してください。\n"
+            "以下のスキーマに一致するJSONのみを返してください。Markdownの装飾や解説は含めないでください。\n"
+            "JSONオブジェクト自体はMarkdownであってはいけませんが、各候補の `answer_text` はMarkdown形式である必要があります。\n"
+            f"{CANDIDATE_MARKDOWN_INSTRUCTIONS}\n"
+            f"質問: {question}\n"
+            f"候補数: {candidate_count}\n"
+            f"スキル適用の有無: {skills_enabled}\n"
+            f"現在のスキルプロファイル（JSON）: {json.dumps(skill_profile, ensure_ascii=False)}\n"
+            f"検索された学習資料（JSON）: {json.dumps(retrievals, ensure_ascii=False)}\n"
+            "指定された数だけ、学習者にとって有益で質の高い、日本語の回答候補を生成してください。"
         )
         try:
             result = self._generate_json(prompt, schema)
