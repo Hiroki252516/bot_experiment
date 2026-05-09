@@ -142,6 +142,11 @@ select {
   color: var(--text);
 }
 
+.button.danger {
+  background: var(--accent);
+  color: #fff;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -306,6 +311,68 @@ select {
   margin: 0;
 }
 
+.document-list-card {
+  overflow: hidden;
+}
+
+.document-list {
+  display: grid;
+  gap: 12px;
+}
+
+.document-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.74);
+}
+
+.document-title {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.document-list-main {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.document-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.document-meta-grid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.document-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 104px;
+  position: relative;
+  z-index: 1;
+}
+
+.document-actions .button {
+  width: 100%;
+  min-height: 42px;
+  padding-inline: 14px;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -332,5 +399,18 @@ select {
 
   .candidate-detail-header {
     display: grid;
+  }
+
+  .document-list-item {
+    grid-template-columns: 1fr;
+  }
+
+  .document-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .document-actions {
+    flex-direction: row;
+    width: 100%;
   }
 }

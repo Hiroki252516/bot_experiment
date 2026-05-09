@@ -219,44 +219,49 @@ export function AdminWorkspace() {
       </section>
 
       <section className="grid-2">
-        <div className="card stack">
+        <div className="card stack document-list-card">
           <h2>投入済み教材</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ファイル名</th>
-                <th>状態</th>
-                <th>Document Skill</th>
-                <th>entries</th>
-                <th>種類</th>
-                <th>由来</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {documents.map((document) => (
-                <tr key={document.document_id}>
-                  <td>{document.filename}</td>
-                  <td>{document.ingest_status}</td>
-                  <td>
-                    {document.document_skill_status ?? "未作成"}
-                    {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
-                  </td>
-                  <td>{document.document_skill_entries_count}</td>
-                  <td>{document.mime_type}</td>
-                  <td>{document.source_type}</td>
-                  <td>
-                    <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
-                      entries
-                    </button>{" "}
-                    <button className="button secondary" onClick={() => handleDeleteDocument(document)} type="button">
-                      削除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="document-list" aria-label="投入済み教材">
+            {documents.map((document) => (
+              <article className="document-list-item" key={document.document_id}>
+                <div className="document-list-main">
+                  <strong className="document-title">{document.filename}</strong>
+                  <div className="document-meta-grid">
+                    <span>
+                      <span className="muted">状態</span>
+                      {document.ingest_status}
+                    </span>
+                    <span>
+                      <span className="muted">Document Skill</span>
+                      {document.document_skill_status ?? "未作成"}
+                      {document.document_skill_revision_number ? ` / rev ${document.document_skill_revision_number}` : ""}
+                    </span>
+                    <span>
+                      <span className="muted">entries</span>
+                      {document.document_skill_entries_count}
+                    </span>
+                    <span>
+                      <span className="muted">種類</span>
+                      {document.mime_type}
+                    </span>
+                    <span>
+                      <span className="muted">由来</span>
+                      {document.source_type}
+                    </span>
+                  </div>
+                </div>
+                <div className="document-actions">
+                  <button className="button secondary" onClick={() => handleLoadDocumentSkillEntries(document)} type="button">
+                    entries
+                  </button>
+                  <button className="button danger" onClick={() => handleDeleteDocument(document)} type="button">
+                    削除
+                  </button>
+                </div>
+              </article>
+            ))}
+            {documents.length === 0 ? <p className="muted">投入済み教材はまだありません。</p> : null}
+          </div>
         </div>
 
         <div className="card stack">
