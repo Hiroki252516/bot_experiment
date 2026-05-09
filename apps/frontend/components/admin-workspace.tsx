@@ -78,6 +78,23 @@ export function AdminWorkspace() {
     }
   }
 
+  async function deleteDocument(document: SourceDocument) {
+    const confirmed = window.confirm(
+      `教材「${document.title} / ${document.filename}」を削除します。既存runで使われている場合はログ保護のため非表示状態にします。よろしいですか？`,
+    );
+    if (!confirmed) return;
+    setError("");
+    setStatus("教材を削除しています...");
+    try {
+      await apiFetch(`/api/admin/documents/${document.document_id}`, { method: "DELETE" });
+      setStatus("教材を削除しました。");
+      await refreshDocuments();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "教材の削除に失敗しました。");
+      setStatus("");
+    }
+  }
+
   async function exportRun(event: FormEvent) {
     event.preventDefault();
     if (!runId) return;
@@ -140,9 +157,14 @@ export function AdminWorkspace() {
                   <td>{document.status}</td>
                   <td>{new Date(document.created_at).toLocaleString("ja-JP")}</td>
                   <td>
-                    <button className="button secondary" onClick={() => extractSkill(document.document_id)} type="button">
-                      Document Skill 抽出
-                    </button>
+                    <div className="inline" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <button className="button secondary" onClick={() => extractSkill(document.document_id)} type="button">
+                        Document Skill 抽出
+                      </button>
+                      <button className="button secondary" onClick={() => deleteDocument(document)} type="button">
+                        削除
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

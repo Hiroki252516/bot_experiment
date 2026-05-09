@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException, UploadFile
 from pypdf import PdfReader
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -73,6 +73,43 @@ def save_source_document(session: Session, file: UploadFile, title: str, descrip
 
 def list_source_documents(session: Session) -> list[SourceDocument]:
     return list(session.scalars(select(SourceDocument).order_by(SourceDocument.created_at.desc())))
+
+
+def delete_source_document(session: Session, document_id: str) -> bool:
+    document = session.get(SourceDocument, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    run_exists = session.scalar(select(ExperimentRun.id).where(ExperimentRun.document_id == document.id).limit(1))
+    if run_exists:
+        document.status = "deleted"
+        document.updated_at = utcnow()
+        session.commit()
+        return False
+
+    revision_ids = list(
+        session.scalars(
+            select(AdaptiveDocumentSkillRevision.id).where(AdaptiveDocumentSkillRevision.document_id == document.id)
+        )
+    )
+    if revision_ids:
+        session.execute(
+            delete(AdaptiveDocumentSkillEntry).where(
+                AdaptiveDocumentSkillEntry.document_skill_revision_id.in_(revision_ids)
+            )
+        )
+        session.execute(
+            delete(AdaptiveDocumentSkillRevision).where(AdaptiveDocumentSkillRevision.id.in_(revision_ids))
+        )
+    session.delete(document)
+    session.commit()
+
+    try:
+        Path(document.file_path).unlink(missing_ok=True)
+    except OSError:
+        # DB delete is more important for keeping the UI usable; stale files can be cleaned manually.
+        pass
+    return True
 
 
 def extract_document_skill(session: Session, document_id: str) -> tuple[SourceDocument, AdaptiveDocumentSkillRevision, int]:

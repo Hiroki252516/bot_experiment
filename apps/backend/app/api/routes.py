@@ -193,6 +193,12 @@ def adaptive_list_documents_route(session: Session = Depends(get_session)) -> li
     ]
 
 
+@router.delete("/api/admin/documents/{document_id}")
+def adaptive_delete_document_route(document_id: str, session: Session = Depends(get_session)) -> dict:
+    hard_deleted = adaptive_service.delete_source_document(session, document_id)
+    return {"document_id": document_id, "deleted": True, "hard_deleted": hard_deleted}
+
+
 @router.post("/api/admin/documents/{document_id}/extract-skill", response_model=ExtractSkillResponse)
 def adaptive_extract_document_skill_route(document_id: str, session: Session = Depends(get_session)) -> ExtractSkillResponse:
     document, revision, entry_count = adaptive_service.extract_document_skill(session, document_id)
