@@ -84,7 +84,7 @@ OpenAI API の hosted Skills を直接使うことは必須ではない。実装
 - Migration: Alembic
 - API schema: Pydantic
 - LLM provider: provider abstraction を必ず挟む
-- Default LLM provider: Gemini
+- Default LLM provider: Ollama (`gemma4:e2b`)
 - Configuration: `.env`
 - Tests: pytest / frontend test tools
 
