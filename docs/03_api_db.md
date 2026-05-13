@@ -26,7 +26,6 @@ RAG は使わない。`document_skill_revisions` / `document_skill_entries` / `l
 - `POST /api/runs/start`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/state`
-- `GET /api/runs/{run_id}/timeline`
 - `POST /api/runs/{run_id}/finish`
 
 ### Initial Test
@@ -56,8 +55,6 @@ RAG は使わない。`document_skill_revisions` / `document_skill_entries` / `l
 ### Results
 
 - `GET /api/runs/{run_id}/results`
-- `GET /api/runs/{run_id}/score-trend`
-- `GET /api/runs/{run_id}/learner-skill-history`
 
 ### Admin Exports
 

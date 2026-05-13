@@ -19,7 +19,10 @@ from app.schemas.admin import (
     SkillHistoryResponse,
 )
 from app.schemas.adaptive import (
+    AdminDocumentDetailResponse,
     AdminDocumentResponse,
+    AdminDocumentSkillRevisionDetailResponse,
+    AdminDocumentSkillRevisionResponse,
     AdminDocumentUploadResponse,
     AssessmentGenerateResponse,
     AssessmentSubmitRequestV2,
@@ -29,6 +32,7 @@ from app.schemas.adaptive import (
     MaterialGenerateResponse,
     MaterialReadConfirmResponseV2,
     ResultResponse,
+    RunDetailResponse,
     RunStartRequestV2,
     RunStartResponseV2,
     RunStateResponse,
@@ -199,6 +203,54 @@ def adaptive_delete_document_route(document_id: str, session: Session = Depends(
     return {"document_id": document_id, "deleted": True, "hard_deleted": hard_deleted}
 
 
+@router.get("/api/admin/documents/{document_id}", response_model=AdminDocumentDetailResponse)
+def adaptive_get_document_route(document_id: str, session: Session = Depends(get_session)) -> AdminDocumentDetailResponse:
+    doc = adaptive_service.get_source_document(session, document_id)
+    return AdminDocumentDetailResponse(
+        document_id=doc.id,
+        title=doc.title,
+        description=doc.description,
+        filename=doc.filename,
+        mime_type=doc.mime_type,
+        status=doc.status,
+        sha256=doc.sha256,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+    )
+
+
+@router.get("/api/admin/documents/{document_id}/skill-revisions", response_model=list[AdminDocumentSkillRevisionResponse])
+def adaptive_list_document_skill_revisions_route(document_id: str, session: Session = Depends(get_session)) -> list[AdminDocumentSkillRevisionResponse]:
+    revisions = adaptive_service.list_document_skill_revisions_by_doc(session, document_id)
+    return [
+        AdminDocumentSkillRevisionResponse(
+            revision_id=r.id,
+            document_id=r.document_id,
+            revision=r.revision,
+            provider=r.provider,
+            model=r.model,
+            schema_version=r.schema_version,
+            created_at=r.created_at,
+        )
+        for r in revisions
+    ]
+
+
+@router.get("/api/admin/document-skill-revisions/{revision_id}", response_model=AdminDocumentSkillRevisionDetailResponse)
+def adaptive_get_document_skill_revision_route(revision_id: str, session: Session = Depends(get_session)) -> AdminDocumentSkillRevisionDetailResponse:
+    r = adaptive_service.get_document_skill_revision_by_id(session, revision_id)
+    return AdminDocumentSkillRevisionDetailResponse(
+        revision_id=r.id,
+        document_id=r.document_id,
+        revision=r.revision,
+        provider=r.provider,
+        model=r.model,
+        schema_version=r.schema_version,
+        skill_json=r.skill_json,
+        created_at=r.created_at,
+    )
+
+
 @router.post("/api/admin/documents/{document_id}/extract-skill", response_model=ExtractSkillResponse)
 def adaptive_extract_document_skill_route(document_id: str, session: Session = Depends(get_session)) -> ExtractSkillResponse:
     document, revision, entry_count = adaptive_service.extract_document_skill(session, document_id)
@@ -231,6 +283,40 @@ def adaptive_start_run_route(payload: dict = Body(...), session: Session = Depen
     parsed = RunStartRequestV2.model_validate(payload)
     run = adaptive_service.start_run(session, parsed.user_id, parsed.document_id, parsed.cycle_count)
     return RunStartResponseV2(run_id=run.id, state=run.state, cycle_count=run.cycle_count).model_dump(mode="json")
+
+
+@router.get("/api/runs/{run_id}", response_model=RunDetailResponse)
+def adaptive_get_run_route(run_id: str, session: Session = Depends(get_session)) -> RunDetailResponse:
+    run = adaptive_service.get_run(session, run_id)
+    return RunDetailResponse(
+        run_id=run.id,
+        user_id=run.user_id,
+        document_id=run.document_id,
+        document_skill_revision_id=run.document_skill_revision_id,
+        state=run.state,
+        cycle_count=run.cycle_count,
+        current_cycle_index=run.current_cycle_index,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+@router.post("/api/runs/{run_id}/finish", response_model=RunDetailResponse)
+def adaptive_finish_run_route(run_id: str, session: Session = Depends(get_session)) -> RunDetailResponse:
+    run = adaptive_service.finish_run_adaptive(session, run_id)
+    return RunDetailResponse(
+        run_id=run.id,
+        user_id=run.user_id,
+        document_id=run.document_id,
+        document_skill_revision_id=run.document_skill_revision_id,
+        state=run.state,
+        cycle_count=run.cycle_count,
+        current_cycle_index=run.current_cycle_index,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
 
 
 @router.get("/api/runs/{run_id}/state", response_model=RunStateResponse)

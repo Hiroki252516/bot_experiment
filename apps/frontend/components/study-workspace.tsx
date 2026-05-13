@@ -297,10 +297,11 @@ export function StudyWorkspace() {
             <div className="card stack" key={question.question_id} style={{ padding: 16 }}>
               <p className="muted">Q{index + 1} / {question.topic} / {question.difficulty}</p>
               <p style={{ fontWeight: 700 }}>{question.stem}</p>
-              {question.choices.map((choice) => (
-                <label className="inline" key={choice} style={{ gap: 8 }}>
+              {question.choices.map((choice, choiceIndex) => (
+                <label className="inline" key={choiceIndex} style={{ gap: 8 }}>
                   <input
                     checked={answers[question.question_id] === choice}
+                    name={question.question_id}
                     onChange={() => setAnswers((current) => ({ ...current, [question.question_id]: choice }))}
                     type="radio"
                   />

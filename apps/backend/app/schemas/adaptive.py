@@ -105,6 +105,37 @@ class AdminDocumentResponse(BaseModel):
     updated_at: datetime
 
 
+class AdminDocumentDetailResponse(AdminDocumentResponse):
+    sha256: str
+
+
+class AdminDocumentSkillRevisionResponse(BaseModel):
+    revision_id: str
+    document_id: str
+    revision: int
+    provider: str
+    model: str
+    schema_version: str
+    created_at: datetime
+
+
+class AdminDocumentSkillRevisionDetailResponse(AdminDocumentSkillRevisionResponse):
+    skill_json: dict
+
+
+class RunDetailResponse(BaseModel):
+    run_id: str
+    user_id: str
+    document_id: str | None
+    document_skill_revision_id: str | None
+    state: str
+    cycle_count: int
+    current_cycle_index: int
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
 class ExtractSkillResponse(BaseModel):
     document_id: str
     document_skill_revision_id: str

@@ -75,10 +75,52 @@ def list_source_documents(session: Session) -> list[SourceDocument]:
     return list(session.scalars(select(SourceDocument).order_by(SourceDocument.created_at.desc())))
 
 
-def delete_source_document(session: Session, document_id: str) -> bool:
+def _require_document(session: Session, document_id: str) -> SourceDocument:
     document = session.get(SourceDocument, document_id)
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+    return document
+
+
+def get_source_document(session: Session, document_id: str) -> SourceDocument:
+    return _require_document(session, document_id)
+
+
+def list_document_skill_revisions_by_doc(session: Session, document_id: str) -> list[AdaptiveDocumentSkillRevision]:
+    _require_document(session, document_id)
+    return list(
+        session.scalars(
+            select(AdaptiveDocumentSkillRevision)
+            .where(AdaptiveDocumentSkillRevision.document_id == document_id)
+            .order_by(AdaptiveDocumentSkillRevision.revision.desc())
+        )
+    )
+
+
+def get_document_skill_revision_by_id(session: Session, revision_id: str) -> AdaptiveDocumentSkillRevision:
+    revision = session.get(AdaptiveDocumentSkillRevision, revision_id)
+    if not revision:
+        raise HTTPException(status_code=404, detail="Document skill revision not found")
+    return revision
+
+
+def finish_run_adaptive(session: Session, run_id: str) -> ExperimentRun:
+    run = _require_run(session, run_id)
+    if run.finished_at:
+        return run
+    run.finished_at = utcnow()
+    session.commit()
+    session.refresh(run)
+    return run
+
+
+def get_run(session: Session, run_id: str) -> ExperimentRun:
+    """Return the ExperimentRun for the given run_id, raising 404 if not found."""
+    return _require_run(session, run_id)
+
+
+def delete_source_document(session: Session, document_id: str) -> bool:
+    document = _require_document(session, document_id)
 
     run_exists = session.scalar(select(ExperimentRun.id).where(ExperimentRun.document_id == document.id).limit(1))
     if run_exists:
@@ -113,9 +155,7 @@ def delete_source_document(session: Session, document_id: str) -> bool:
 
 
 def extract_document_skill(session: Session, document_id: str) -> tuple[SourceDocument, AdaptiveDocumentSkillRevision, int]:
-    document = session.get(SourceDocument, document_id)
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
+    document = _require_document(session, document_id)
     document.status = "processing"
     document.updated_at = utcnow()
     session.commit()
