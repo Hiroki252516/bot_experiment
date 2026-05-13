@@ -1,160 +1,232 @@
 # 07 Adaptive Learning Design（研究仕様の正本）
 
-本書は、本プロジェクトの研究フロー・A/B/C 条件・チャット制約・ログ仕様を確定する「機能変更の設計書」である。
-既存の `docs/01_prd.md`, `docs/02_architecture.md`, `docs/03_api_db.md`, `docs/05_evaluation_protocol.md` は本書を参照し、必要な要点を抜粋して整合させる。
+## 1. 本書の位置づけ
 
----
+本書は、本プロジェクトの研究フロー・Agent Skill 設計・ログ仕様・評価仕様を確定する正本である。`docs/00_codex_task.md`、`docs/01_prd.md`、`docs/02_architecture.md`、`docs/03_api_db.md`、`docs/04_implementation_plan.md`、`docs/05_evaluation_protocol.md` は本書に従って整合させる。
 
-## 1. 研究目的・仮説
-- 仮説：**学習ログに基づく適応型チャットボット（Group A: Skillsあり）は、非適応型（Group B: Skillsなし）より学習効果を向上させる。**
-- 学習効果は主に Pre-test と Post-test の得点差（gain）で評価する。
-- RAG/ベクトル検索の優劣比較は主題にしない。
+## 2. 研究目的
 
----
+管理者がアップロードした PDF 教材の範囲内で、被験者が初回時点で何を理解し、何を理解していないかを AI が推定する。その推定に基づいて、弱点を重点的に補う教材とテストを 10 サイクル生成し、最終テストで初回テストからの成績向上を測定する。
 
-## 2. 実験群（A/B/C）の定義
+## 3. 技術的中核
 
-### Group A（Skillsあり / 適応型）
-- 学習ログ（質問・回答・教材閲覧・MCQ結果・所要時間など）を DB に保存する。
-- 学習ログから `skill_profile`（テキスト/JSON）を更新し、次の生成に反映する。
-  - 次教材生成（テキスト）
-  - 次ミニテスト生成（MCQ）
-  - 教材閲覧中の質問への回答（読解支援チャット）
+本研究では RAG を使わない。教材参照と学習者状態参照は Agent Skills によって行う。
 
-### Group B（Skillsなし / 非適応型）
-- 学習ログ（質問・回答ログ含む）は **Aと同等に保存**する（分析のため）。
-- ただし `skill_profile` は **参照しない・更新しない**（=プロンプトへ入れない）。
-- 生成は「その場の入力（教材本文+ユーザー質問等）」のみで行う。
+- PDF 教材: Document Agent Skill に変換する。
+- 被験者の理解状態: Learner Agent Skill として更新する。
+- 生成時: Document Agent Skill と Learner Agent Skill を deterministic に context 化して LLM に渡す。
+- 禁止: embedding retrieval、vector search、runtime chunk retrieval。
 
-### Group C（書籍学習 / 対照）
-- 教材形式：**テキスト**（固定教材）。
-- フロー：**A/Bと同一**（Pre-test→教材→ミニテスト→推定→次教材…→Post-test）。ミニテストも挟む。
-- チャット：原則なし（読解支援チャットによる介入を持たない条件として扱う）。
+## 4. 実験前準備
 
----
+1. 管理者が Web アプリの管理者画面にアクセスする。
+2. 本実験で学習対象とする教材 PDF をアップロードする。
+3. システムが PDF を解析し、Document Agent Skill を生成する。
+4. 管理者が Document Agent Skill の ready 状態を確認する。
+5. 被験者が実験を開始できる状態になる。
 
-## 3. 学習フロー（確定）
+## 5. 実験フロー
 
-### 3.1 全体フロー（A/B/C 共通の進行）
-1. ログイン（簡易 user_id でも可）
-2. **初回テスト（MCQ / Pre-test）**
-3. **AIが理解度に合う教材（テキスト）生成**（A/B） / **固定教材提示**（C）
-4. ユーザーが熟読
-5. **「ミニテスト開始」**
-6. **ミニテスト生成（MCQ）→ 回答 → 自動採点**
-7. **理解度推定**
-8. **次教材生成/提示**
-9. 3〜8 を **3回反復（Cycle 1〜3）**
-10. **最終テスト（MCQ / Post-test）**
+### 5.1 全体フロー
 
-### 3.2 回数・制限時間
-- 反復回数は **とりあえず 3 回**（`cycle_count=3`）。
-- 教材・テストとも **制限時間を設けない**（強制終了なし）。
-- ただし、**教材閲覧時間・テスト所要時間は必ずログとして保存**する。
+1. 被験者ログイン
+2. 初回テスト生成
+3. 初回テスト受験
+4. 初回テスト送信
+5. AI による初回理解度推定
+6. Learner Agent Skill 初期化
+7. Cycle 1 教材生成
+8. 被験者が教材を読む
+9. Cycle 1 テスト生成
+10. 被験者が Cycle 1 テストを受験・送信
+11. AI が結果分析し Learner Agent Skill 更新
+12. Cycle 2 教材生成
+13. 以後、Cycle 10 まで繰り返す
+14. 最終テスト生成
+15. 最終テスト受験・送信
+16. 初回テストと最終テストの比較結果を表示
 
----
+### 5.2 サイクル回数
 
-## 4. チャット機能（教材閲覧中のみ）
+- 学習サイクルは **10 回** 固定を MVP とする。
+- DB には `cycle_count` として保存し、初期値を 10 とする。
+- 将来の研究拡張では変更可能にしてよいが、現行実験では 10 回を正とする。
 
-### 4.1 チャット可能タイミング（研究の制約）
-- **教材閲覧中のみチャット可能**（読解支援用途に限定）。
-- Pre-test / Mini-test 解答中 / Post-test 解答中はチャット不可（介入を制限）。
+### 5.3 制限時間
 
-### 4.2 A/B の差分（厳密定義）
-#### Group A（Skillsあり）
-- 入力（概念）:
-  - 教材本文
-  - ユーザー質問
-  - 直近の学習ログ要約（必要最小限）
-  - **`skill_profile`（最新版）**
-- 出力:
-  - 読解支援の回答（教材の範囲に寄せる）
-- 学習ログとして保存し、**次の教材/ミニテスト/質問回答に反映**する。
+- 教材閲覧・テストに強制制限時間は設けない。
+- ただし以下を必ず保存する。
+  - 教材提示時刻
+  - 教材読了時刻
+  - 教材閲覧時間
+  - テスト開始時刻
+  - テスト送信時刻
+  - テスト所要時間
 
-#### Group B（Skillsなし）
-- 入力:
-  - 教材本文
-  - ユーザー質問
-  - （任意）直近ログ要約は入れてもよいが、**`skill_profile` は入れない**
-- 出力:
-  - 読解支援の回答
-- ログは保存するが、**適応（更新・参照・反映）はしない**。
+## 6. 初回テスト
 
----
+### 6.1 目的
 
-## 5. 教材閲覧「読了」判定（確定）
-- 読了判定は **ボタン操作のみ**（最低閲覧時間などの制約は設けない）。
-- ただし以下は必須ログとする:
-  - presented_at（教材提示時刻）
-  - read_confirmed_at（読了ボタン押下時刻）
-  - read_duration_seconds（差分）
+PDF教材が扱う学習範囲全体に対して、被験者の初期習熟度を測定する。
 
----
+### 6.2 生成条件
 
-## 6. 学習ログ（Learning Log）仕様（教材・テスト時間を含む）
+- Document Agent Skill の assessment_blueprint を使用する。
+- 学習範囲全体を偏りなく覆う。
+- 基礎・標準・応用の難易度を含める。
+- 問題数は MVP では 20 問を初期値とする。
 
-### 6.1 必須ログ（A/B/C共通）
-#### run（実験1回）
-- run_id, user_id
-- group（A|B|C）, skills_enabled
-- cycle_count（=3）
-- started_at, finished_at
-- provider/model/prompt_version/temperature 等の再現性メタ情報
+### 6.3 送信後処理
 
-#### 教材（Cycle 1..3）
-- material_id, run_id, cycle_index
-- source_type（generated|fixed）
-- content_text（教材本文）
-- presented_at, read_confirmed_at, read_duration_seconds
+- 自動採点する。
+- トピック別正誤を分析する。
+- 理解済み領域・未理解領域・誤概念を推定する。
+- Learner Agent Skill revision 1 を作成する。
 
-#### テスト（Pre/Mini/Post）
-テスト定義:
-- assessment_id, run_id
-- assessment_type（pre_test|mini_test|post_test）
-- cycle_index（miniのみ）
-- questions（JSON: stem/choices/correct）
+## 7. 教材生成
 
-テスト試行（attempt）:
-- assessment_attempt_id, assessment_id, run_id
-- started_at, submitted_at, duration_seconds
-- answers（JSON）, score/max_score, per_question_correct（JSON）
+### 7.1 目的
 
-#### 理解度推定
-- mastery_estimate_id, run_id, cycle_index
-- mastery_estimate, confidence, evidence_summary
+被験者の理解が甘い部分を重点的に補う、教科書・参考書風の教材を生成する。
 
-### 6.2 チャットログ（A/Bのみ）
-- chat_turn_id, run_id, material_id, cycle_index
-- question_text, answer_text
-- created_at
+### 7.2 入力
 
-### 6.3 Skills ログ（Aのみ）
-- skills（active_revision）
-- skill_revisions（profile_json, update_reason, created_at）
+- Document Agent Skill
+- 最新の Learner Agent Skill
+- 直前テストの分析結果
+- 過去に生成した教材の要約
 
----
+### 7.3 出力
 
-## 7. `skill_profile`（テキスト/JSON）の位置づけ
-- Skills はベクトル必須ではない。本研究では `skill_profile` を **テキスト/JSON（DB保存）**として扱う。
-- Aのみ更新・参照・反映し、B/Cでは無効（参照/更新なし）。
+- タイトル
+- 学習目標
+- 本文
+- 例
+- 注意点
+- よくある誤り
+- 確認ポイント
+- 次テストで測る観点
 
-最低限のフィールド例（MVP）:
-- mastery（0.0〜1.0）
-- known_topics / weak_topics
-- common_mistakes
-- recommended_difficulty
-- version / updated_at
+### 7.4 読了判定
 
----
+被験者が「テスト開始」ボタンを押した時点で教材読了とみなす。最低閲覧時間は設定しないが、閲覧時間は保存する。
 
-## 8. 評価指標（最小）
-- 主指標: gain（Post - Pre）を A/B/C で群比較
-- 補助: Cycle 1..3 の推移、教材閲覧時間、テスト所要時間、（A/Bのみ）チャット介入量
+## 8. サイクルテスト
 
----
+### 8.1 目的
 
-## 9. 既存 docs への反映方針（整合ルール）
-- `docs/01_prd.md`: 研究目的/範囲/成功条件を本書に合わせる
-- `docs/02_architecture.md`: 研究フロー中心に責務を再配置（RAG主題から外す注記）
-- `docs/03_api_db.md`: run/material/assessment/mastery/chat の API と DB、時間ログ必須を明記
-- `docs/05_evaluation_protocol.md`: A/B/C、Pre/Post差、時間ログ、必要CSVを更新
+教材読了後に、被験者が対象範囲をどの程度理解したかを測定する。
+
+### 8.2 生成条件
+
+- Document Agent Skill の範囲内で生成する。
+- 最新 Learner Agent Skill の weak_topics を重点化する。
+- 初回テストおよび過去サイクルテストと完全同一の問題を出さない。
+- 問題 fingerprint を生成し、重複判定に使う。
+- 問題数は MVP では 10 問を初期値とする。
+
+### 8.3 送信後処理
+
+- 自動採点する。
+- トピック別理解度を更新する。
+- 誤概念を更新する。
+- 次サイクルで重点化する項目を決める。
+- Learner Agent Skill の新 revision を保存する。
+
+## 9. 最終テスト
+
+### 9.1 目的
+
+10 サイクル後、PDF教材の学習範囲全体について最終的な習熟度を測定する。
+
+### 9.2 生成条件
+
+- 初回テストと同じ学習範囲を測る。
+- ただし同一問題の丸写しは避ける。
+- 問題数は MVP では 20 問を初期値とする。
+- 初回テストとの比較が可能な blueprint にする。
+
+### 9.3 送信後処理
+
+- 自動採点する。
+- 初回テストとの score gain を計算する。
+- トピック別改善を計算する。
+- 改善点・残課題を表示する。
+
+## 10. Agent Skill 定義
+
+### 10.1 Document Agent Skill
+
+PDF教材を学習・生成・評価に使いやすい形に変換したもの。
+
+```json
+{
+  "learning_objectives": [],
+  "topic_map": [],
+  "concept_definitions": [],
+  "prerequisite_concepts": [],
+  "examples": [],
+  "common_misconceptions": [],
+  "difficulty_map": [],
+  "assessment_blueprint": [],
+  "canonical_explanations": [],
+  "out_of_scope": []
+}
+```
+
+### 10.2 Learner Agent Skill
+
+被験者の理解状態を表すもの。
+
+```json
+{
+  "overall_mastery": 0.0,
+  "mastery_by_topic": {},
+  "known_topics": [],
+  "weak_topics": [],
+  "common_mistakes": [],
+  "misconception_hypotheses": [],
+  "recommended_next_focus": [],
+  "recommended_difficulty": "basic",
+  "used_question_fingerprints": [],
+  "evidence_from_attempts": []
+}
+```
+
+## 11. 評価指標
+
+### 主指標
+
+- final_score - initial_score
+- final_accuracy - initial_accuracy
+
+### 補助指標
+
+- Cycle 1〜10 の score trend
+- mastery_by_topic trend
+- weak_topics の減少
+- 教材閲覧時間
+- テスト所要時間
+- 問題重複率
+
+## 12. 結果表示
+
+被験者・管理者に以下を表示する。
+
+- 初回テスト点数
+- 最終テスト点数
+- 点数差
+- 正答率差
+- サイクル別点数推移
+- 改善したトピック
+- まだ弱いトピック
+- AI による総評
+
+## 13. 整合ルール
+
+- 10 サイクルを正とする。
+- 教材参照は Document Agent Skill を使う。
+- 学習者状態は Learner Agent Skill を使う。
+- RAG は使わない。
+- すべての生成・採点・分析ログを保存する。
+- LLM 出力は JSON schema で検証する。

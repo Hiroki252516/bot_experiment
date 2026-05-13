@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -17,6 +17,25 @@ from app.schemas.admin import (
     ExperimentRunResponse,
     RuntimeProviderResponse,
     SkillHistoryResponse,
+)
+from app.schemas.adaptive import (
+    AdminDocumentDetailResponse,
+    AdminDocumentResponse,
+    AdminDocumentSkillRevisionDetailResponse,
+    AdminDocumentSkillRevisionResponse,
+    AdminDocumentUploadResponse,
+    AssessmentGenerateResponse,
+    AssessmentSubmitRequestV2,
+    AssessmentSubmitResponseV2,
+    ExportJobResponse,
+    ExtractSkillResponse,
+    MaterialGenerateResponse,
+    MaterialReadConfirmResponseV2,
+    ResultResponse,
+    RunDetailResponse,
+    RunStartRequestV2,
+    RunStartResponseV2,
+    RunStateResponse,
 )
 from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthUserResponse
 from app.schemas.chat import (
@@ -90,6 +109,7 @@ from app.services.study import (
     submit_assessment,
 )
 from app.services.users import create_user, get_user_with_skill
+from app.services import adaptive as adaptive_service
 
 router = APIRouter()
 
@@ -141,20 +161,355 @@ def health(session: Session = Depends(get_session)) -> HealthResponse:
     return HealthResponse(status="ok", database="ok", timestamp=datetime.now(timezone.utc))
 
 
-# --- Study flow APIs (Pre → Cycle1..3 → Post) ---
+# --- Adaptive learning MVP APIs (Document Agent Skill + 10 cycles, no runtime RAG) ---
 
 
-@router.post("/api/runs/start", response_model=RunStartResponse)
-def start_run_route(payload: RunStartRequest, session: Session = Depends(get_session)) -> RunStartResponse:
-    run = start_run(session, user_id=payload.user_id, group=payload.group, cycle_count=payload.cycle_count)
-    return RunStartResponse(
+@router.post("/api/admin/documents/upload", response_model=AdminDocumentUploadResponse)
+def adaptive_upload_document_route(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    description: str | None = Form(None),
+    session: Session = Depends(get_session),
+) -> AdminDocumentUploadResponse:
+    document = adaptive_service.save_source_document(session, file, title=title or (file.filename or "教材"), description=description)
+    return AdminDocumentUploadResponse(
+        document_id=document.id,
+        status=document.status,
+        title=document.title,
+        created_at=document.created_at,
+    )
+
+
+@router.get("/api/admin/documents", response_model=list[AdminDocumentResponse])
+def adaptive_list_documents_route(session: Session = Depends(get_session)) -> list[AdminDocumentResponse]:
+    return [
+        AdminDocumentResponse(
+            document_id=document.id,
+            title=document.title,
+            description=document.description,
+            filename=document.filename,
+            mime_type=document.mime_type,
+            status=document.status,
+            created_at=document.created_at,
+            updated_at=document.updated_at,
+        )
+        for document in adaptive_service.list_source_documents(session)
+    ]
+
+
+@router.delete("/api/admin/documents/{document_id}")
+def adaptive_delete_document_route(document_id: str, session: Session = Depends(get_session)) -> dict:
+    hard_deleted = adaptive_service.delete_source_document(session, document_id)
+    return {"document_id": document_id, "deleted": True, "hard_deleted": hard_deleted}
+
+
+@router.get("/api/admin/documents/{document_id}", response_model=AdminDocumentDetailResponse)
+def adaptive_get_document_route(document_id: str, session: Session = Depends(get_session)) -> AdminDocumentDetailResponse:
+    doc = adaptive_service.get_source_document(session, document_id)
+    return AdminDocumentDetailResponse(
+        document_id=doc.id,
+        title=doc.title,
+        description=doc.description,
+        filename=doc.filename,
+        mime_type=doc.mime_type,
+        status=doc.status,
+        sha256=doc.sha256,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+    )
+
+
+@router.get("/api/admin/documents/{document_id}/skill-revisions", response_model=list[AdminDocumentSkillRevisionResponse])
+def adaptive_list_document_skill_revisions_route(document_id: str, session: Session = Depends(get_session)) -> list[AdminDocumentSkillRevisionResponse]:
+    revisions = adaptive_service.list_document_skill_revisions_by_doc(session, document_id)
+    return [
+        AdminDocumentSkillRevisionResponse(
+            revision_id=r.id,
+            document_id=r.document_id,
+            revision=r.revision,
+            provider=r.provider,
+            model=r.model,
+            schema_version=r.schema_version,
+            created_at=r.created_at,
+        )
+        for r in revisions
+    ]
+
+
+@router.get("/api/admin/document-skill-revisions/{revision_id}", response_model=AdminDocumentSkillRevisionDetailResponse)
+def adaptive_get_document_skill_revision_route(revision_id: str, session: Session = Depends(get_session)) -> AdminDocumentSkillRevisionDetailResponse:
+    r = adaptive_service.get_document_skill_revision_by_id(session, revision_id)
+    return AdminDocumentSkillRevisionDetailResponse(
+        revision_id=r.id,
+        document_id=r.document_id,
+        revision=r.revision,
+        provider=r.provider,
+        model=r.model,
+        schema_version=r.schema_version,
+        skill_json=r.skill_json,
+        created_at=r.created_at,
+    )
+
+
+@router.post("/api/admin/documents/{document_id}/extract-skill", response_model=ExtractSkillResponse)
+def adaptive_extract_document_skill_route(document_id: str, session: Session = Depends(get_session)) -> ExtractSkillResponse:
+    document, revision, entry_count = adaptive_service.extract_document_skill(session, document_id)
+    return ExtractSkillResponse(
+        document_id=document.id,
+        document_skill_revision_id=revision.id,
+        status=document.status,
+        entry_count=entry_count,
+    )
+
+
+@router.post("/api/runs/start")
+def adaptive_start_run_route(payload: dict = Body(...), session: Session = Depends(get_session)) -> dict:
+    if "document_id" not in payload:
+        # Legacy study-flow compatibility. New adaptive UI always sends document_id.
+        legacy_run = start_run(
+            session,
+            user_id=payload["user_id"],
+            group=payload.get("group", "A"),
+            cycle_count=int(payload.get("cycle_count", 3)),
+        )
+        return {
+            "run_id": legacy_run.id,
+            "user_id": legacy_run.user_id,
+            "group": legacy_run.group,
+            "skills_enabled": legacy_run.skills_enabled,
+            "cycle_count": legacy_run.cycle_count,
+            "created_at": legacy_run.created_at,
+        }
+    parsed = RunStartRequestV2.model_validate(payload)
+    run = adaptive_service.start_run(session, parsed.user_id, parsed.document_id, parsed.cycle_count)
+    return RunStartResponseV2(run_id=run.id, state=run.state, cycle_count=run.cycle_count).model_dump(mode="json")
+
+
+@router.get("/api/runs/{run_id}", response_model=RunDetailResponse)
+def adaptive_get_run_route(run_id: str, session: Session = Depends(get_session)) -> RunDetailResponse:
+    run = adaptive_service.get_run(session, run_id)
+    return RunDetailResponse(
         run_id=run.id,
         user_id=run.user_id,
-        group=run.group,
-        skills_enabled=run.skills_enabled,
+        document_id=run.document_id,
+        document_skill_revision_id=run.document_skill_revision_id,
+        state=run.state,
         cycle_count=run.cycle_count,
+        current_cycle_index=run.current_cycle_index,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
         created_at=run.created_at,
     )
+
+
+@router.post("/api/runs/{run_id}/finish", response_model=RunDetailResponse)
+def adaptive_finish_run_route(run_id: str, session: Session = Depends(get_session)) -> RunDetailResponse:
+    run = adaptive_service.finish_run_adaptive(session, run_id)
+    return RunDetailResponse(
+        run_id=run.id,
+        user_id=run.user_id,
+        document_id=run.document_id,
+        document_skill_revision_id=run.document_skill_revision_id,
+        state=run.state,
+        cycle_count=run.cycle_count,
+        current_cycle_index=run.current_cycle_index,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+    )
+
+
+@router.get("/api/runs/{run_id}/state", response_model=RunStateResponse)
+def adaptive_run_state_route(run_id: str, session: Session = Depends(get_session)) -> RunStateResponse:
+    return RunStateResponse(**adaptive_service.get_run_state(session, run_id))
+
+
+@router.post("/api/runs/{run_id}/initial-test/generate", response_model=AssessmentGenerateResponse)
+def adaptive_generate_initial_test_route(run_id: str, session: Session = Depends(get_session)) -> AssessmentGenerateResponse:
+    assessment = adaptive_service.generate_initial_test(session, run_id)
+    return AssessmentGenerateResponse(
+        assessment_id=assessment.id,
+        assessment_type=assessment.assessment_type,
+        question_count=len(assessment.questions_json.get("questions", [])),
+        state="INITIAL_TEST_GENERATED",
+    )
+
+
+@router.get("/api/runs/{run_id}/initial-test")
+def adaptive_get_initial_test_route(run_id: str, session: Session = Depends(get_session)) -> dict:
+    assessment = adaptive_service._latest_assessment(session, run_id, "initial", None)
+    return {"assessment_id": assessment.id, **assessment.questions_json}
+
+
+@router.post("/api/runs/{run_id}/initial-test/submit", response_model=AssessmentSubmitResponseV2)
+def adaptive_submit_initial_test_route(
+    run_id: str,
+    payload: AssessmentSubmitRequestV2,
+    session: Session = Depends(get_session),
+) -> AssessmentSubmitResponseV2:
+    attempt, revision = adaptive_service.submit_initial_test(
+        session,
+        run_id,
+        [answer.model_dump() for answer in payload.answers],
+        payload.submitted_at,
+    )
+    return AssessmentSubmitResponseV2(
+        attempt_id=attempt.id,
+        score=attempt.score or 0,
+        max_score=attempt.max_score or 0,
+        learner_skill_revision_id=revision.id,
+        state="INITIAL_TEST_SUBMITTED",
+        next_cycle_index=1,
+    )
+
+
+@router.post("/api/runs/{run_id}/cycles/{cycle_index}/material/generate", response_model=MaterialGenerateResponse)
+def adaptive_generate_material_route(run_id: str, cycle_index: int, session: Session = Depends(get_session)) -> MaterialGenerateResponse:
+    material = adaptive_service.generate_cycle_material(session, run_id, cycle_index)
+    return MaterialGenerateResponse(
+        material_id=material.id,
+        cycle_index=material.cycle_index,
+        title=material.title,
+        state="CYCLE_MATERIAL_GENERATED",
+    )
+
+
+@router.get("/api/runs/{run_id}/cycles/{cycle_index}/material")
+def adaptive_get_material_route(run_id: str, cycle_index: int, session: Session = Depends(get_session)) -> dict:
+    material = adaptive_service._latest_material(session, run_id, cycle_index)
+    return {
+        "material_id": material.id,
+        "run_id": material.run_id,
+        "cycle_index": material.cycle_index,
+        "title": material.title,
+        "content_markdown": material.content_markdown,
+        "focus_topics": material.focus_topics_json,
+        "created_at": material.created_at,
+    }
+
+
+@router.post("/api/runs/{run_id}/cycles/{cycle_index}/material/read-confirm", response_model=MaterialReadConfirmResponseV2)
+def adaptive_confirm_material_read_route(run_id: str, cycle_index: int, session: Session = Depends(get_session)) -> MaterialReadConfirmResponseV2:
+    read = adaptive_service.confirm_material_read(session, run_id, cycle_index)
+    return MaterialReadConfirmResponseV2(
+        material_read_id=read.id,
+        read_duration_seconds=read.read_duration_seconds,
+        state="CYCLE_MATERIAL_READ",
+    )
+
+
+@router.post("/api/runs/{run_id}/cycles/{cycle_index}/test/generate", response_model=AssessmentGenerateResponse)
+def adaptive_generate_cycle_test_route(run_id: str, cycle_index: int, session: Session = Depends(get_session)) -> AssessmentGenerateResponse:
+    assessment = adaptive_service.generate_cycle_test(session, run_id, cycle_index)
+    return AssessmentGenerateResponse(
+        assessment_id=assessment.id,
+        assessment_type=assessment.assessment_type,
+        cycle_index=assessment.cycle_index,
+        question_count=len(assessment.questions_json.get("questions", [])),
+        state="CYCLE_TEST_GENERATED",
+    )
+
+
+@router.get("/api/runs/{run_id}/cycles/{cycle_index}/test")
+def adaptive_get_cycle_test_route(run_id: str, cycle_index: int, session: Session = Depends(get_session)) -> dict:
+    assessment = adaptive_service._latest_assessment(session, run_id, "cycle", cycle_index)
+    return {"assessment_id": assessment.id, "cycle_index": cycle_index, **assessment.questions_json}
+
+
+@router.post("/api/runs/{run_id}/cycles/{cycle_index}/test/submit", response_model=AssessmentSubmitResponseV2)
+def adaptive_submit_cycle_test_route(
+    run_id: str,
+    cycle_index: int,
+    payload: AssessmentSubmitRequestV2,
+    session: Session = Depends(get_session),
+) -> AssessmentSubmitResponseV2:
+    attempt, revision = adaptive_service.submit_cycle_test(
+        session,
+        run_id,
+        cycle_index,
+        [answer.model_dump() for answer in payload.answers],
+        payload.submitted_at,
+    )
+    return AssessmentSubmitResponseV2(
+        attempt_id=attempt.id,
+        score=attempt.score or 0,
+        max_score=attempt.max_score or 0,
+        learner_skill_revision_id=revision.id,
+        state="CYCLE_TEST_SUBMITTED",
+        next_cycle_index=cycle_index + 1 if cycle_index < 10 else None,
+    )
+
+
+@router.post("/api/runs/{run_id}/final-test/generate", response_model=AssessmentGenerateResponse)
+def adaptive_generate_final_test_route(run_id: str, session: Session = Depends(get_session)) -> AssessmentGenerateResponse:
+    assessment = adaptive_service.generate_final_test(session, run_id)
+    return AssessmentGenerateResponse(
+        assessment_id=assessment.id,
+        assessment_type=assessment.assessment_type,
+        question_count=len(assessment.questions_json.get("questions", [])),
+        state="FINAL_TEST_GENERATED",
+    )
+
+
+@router.get("/api/runs/{run_id}/final-test")
+def adaptive_get_final_test_route(run_id: str, session: Session = Depends(get_session)) -> dict:
+    assessment = adaptive_service._latest_assessment(session, run_id, "final", None)
+    return {"assessment_id": assessment.id, **assessment.questions_json}
+
+
+@router.post("/api/runs/{run_id}/final-test/submit", response_model=AssessmentSubmitResponseV2)
+def adaptive_submit_final_test_route(
+    run_id: str,
+    payload: AssessmentSubmitRequestV2,
+    session: Session = Depends(get_session),
+) -> AssessmentSubmitResponseV2:
+    attempt, _summary = adaptive_service.submit_final_test(
+        session,
+        run_id,
+        [answer.model_dump() for answer in payload.answers],
+        payload.submitted_at,
+    )
+    return AssessmentSubmitResponseV2(
+        attempt_id=attempt.id,
+        score=attempt.score or 0,
+        max_score=attempt.max_score or 0,
+        learner_skill_revision_id=None,
+        state="RESULT_READY",
+    )
+
+
+@router.get("/api/runs/{run_id}/results", response_model=ResultResponse)
+def adaptive_results_route(run_id: str, session: Session = Depends(get_session)) -> ResultResponse:
+    summary = adaptive_service.get_results(session, run_id)
+    return ResultResponse(
+        run_id=summary.run_id,
+        initial_score=summary.initial_score,
+        final_score=summary.final_score,
+        gain_score=summary.gain_score,
+        gain_rate=summary.gain_rate,
+        initial_accuracy=summary.initial_accuracy,
+        final_accuracy=summary.final_accuracy,
+        accuracy_gain=summary.accuracy_gain,
+        cycle_score_trend=summary.cycle_score_trend,
+        improved_topics=summary.improved_topics,
+        remaining_weak_topics=summary.remaining_weak_topics,
+        ai_summary=summary.ai_summary,
+    )
+
+
+@router.post("/api/admin/exports/runs/{run_id}", response_model=ExportJobResponse)
+def adaptive_export_run_route(run_id: str, session: Session = Depends(get_session)) -> ExportJobResponse:
+    job = adaptive_service.export_run_zip(session, run_id)
+    return ExportJobResponse(export_job_id=job.id, status=job.status, file_path=job.file_path)
+
+
+@router.get("/api/admin/exports/{export_job_id}", response_model=ExportJobResponse)
+def adaptive_get_export_route(export_job_id: str, session: Session = Depends(get_session)) -> ExportJobResponse:
+    job = adaptive_service.get_export_job(session, export_job_id)
+    return ExportJobResponse(export_job_id=job.id, status=job.status, file_path=job.file_path)
+
+
+# --- Study flow APIs (Pre → Cycle1..3 → Post) ---
 
 
 @router.post("/api/runs/finish", response_model=RunFinishResponse)

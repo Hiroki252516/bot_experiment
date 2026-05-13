@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     generation_provider: str | None = None
     embedding_provider: str = "local-sentence-transformers"
-    llm_provider: str = "gemini"
+    llm_provider: str = "ollama"
     gemini_api_key: str = ""
     gemini_model_generate: str = "gemini-2.0-flash"
     gemini_model_embed: str = "gemini-embedding-001"

@@ -38,7 +38,13 @@ def create_experiment_run(session: Session, payload) -> ExperimentRun:
 
 
 def list_experiment_runs(session: Session) -> list[ExperimentRun]:
-    return list(session.scalars(select(ExperimentRun).order_by(ExperimentRun.created_at.desc())))
+    return list(
+        session.scalars(
+            select(ExperimentRun)
+            .where(ExperimentRun.chat_message_id.is_not(None))
+            .order_by(ExperimentRun.created_at.desc())
+        )
+    )
 
 
 def export_logs_zip(session: Session) -> Path:

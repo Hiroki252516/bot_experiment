@@ -1,143 +1,264 @@
 # 04 Implementation Plan
 
-> 2026-05 update: Phase 4 は runtime RAG ではなく **Document Skill extraction** を実装対象とする。Phase 5 の候補生成は `Document Agent Skills JSON` と `Preference Skill JSON` を prompt に渡す。
+## 1. 実装方針
 
-## 1. Phase 1 — Repo skeleton
-受け入れ条件:
-- monorepo ができている
-- frontend/backend/worker が分かれている
-- Dockerfiles がある
-- docker compose で空コンテナ起動できる
+最初に、1 つの PDF 教材、1 人の被験者、10 サイクル、最終テスト、結果表示までを end-to-end で完走する MVP を作る。RAG は実装しない。PDF は Document Agent Skill に変換し、被験者の状態は Learner Agent Skill として revision 保存する。
 
-## 2. Phase 2 — Backend foundation
-実装:
-- FastAPI app
-- settings
-- DB connection
-- Alembic
-- health endpoint
+## Phase 0: 仕様同期
+
+### 作業
+
+- docs の更新
+- RAG 非採用方針の明記
+- 10 サイクル固定の定義
+- Agent Skill schema の確定
+
+### 受け入れ条件
+
+- `docs/00`〜`docs/07` が同じ実験フローを指している。
+- `cycle_count=10` が正本仕様になっている。
+
+## Phase 1: Monorepo / Docker skeleton
+
+### 作業
+
+- `apps/backend`
+- `apps/frontend`
+- `apps/worker`
+- `packages/shared-schemas`
+- Dockerfile
+- docker-compose.yml
+- env sample
+
+### 受け入れ条件
+
+- `docker compose up --build` で backend/frontend/db/worker が起動する。
+- `GET /api/health` が 200 を返す。
+
+## Phase 2: DB schema / migrations
+
+### 作業
+
 - SQLAlchemy models
+- Alembic migration
+- Pydantic schemas
+- seed data
 
-受け入れ条件:
-- `/health` が通る
-- migration が適用できる
+### 対象テーブル
 
-## 3. Phase 3 — Frontend foundation
-実装:
-- run start page（A/B/C の条件表示）
-- study flow pages（Pre → Material → Mini → Post）
-- log page（run 一覧 / 詳細）
-- admin page（skills history / recompute）
-- API client
-- basic styling only
+- users
+- source_documents
+- document_skill_revisions
+- document_skill_entries
+- experiment_runs
+- generated_assessments
+- assessment_attempts
+- generated_materials
+- material_reads
+- learner_skill_revisions
+- generation_logs
+- export_jobs
 
-受け入れ条件:
-- 画面遷移できる
-- mock API でも表示できる
+### 受け入れ条件
 
-## 4. Phase 4 — Document ingestion / Document Skill
-実装:
-- upload endpoint
-- parser
-- Document Skill extraction
-- deterministic merge
-- document_skill_revisions / document_skill_entries 保存
+- migration が通る。
+- seed user を作成できる。
+- RAG 用テーブルを新規 runtime path に含めない。
 
-受け入れ条件:
-- サンプル文書を ingest できる
-- Document Skill entries を確認できる
-## 4. Phase 4 — Study flow（Pre → Cycle1..3 → Post）
-本研究の正本仕様は `docs/07_adaptive_learning_design.md` を参照。
+## Phase 3: Admin PDF upload
 
-実装:
-- run 管理（A/B/C, skills_enabled, cycle_count=3）
-- Pre-test（MCQ）: start/submit, 自動採点, 所要時間ログ
-- Material: next/present, 読了 confirm, 所要時間ログ
-- Chat（教材閲覧中のみ）: ask, ログ保存（A/Bのみ）
-- Mini-test（MCQ）: start/submit, 自動採点, 所要時間ログ（Cycle 1..3）
-- Mastery estimate: 推定保存（Cycle 1..3）
-- Post-test（MCQ）: start/submit, 自動採点, 所要時間ログ
-- export（CSV/JSONL）: run/material/read/assessment/attempt/mastery/chat/skills を出力
+### 作業
 
-受け入れ条件:
-- Pre → Cycle1..3 → Post を 1 user で完走できる
-- 教材閲覧時間・テスト所要時間が必ず保存される（時間制限は設けない）
-- チャットは教材閲覧中のみ実行できる（それ以外は拒否）
+- admin upload UI
+- upload API
+- file storage
+- document list UI
+- document detail UI
 
-## 5. Phase 5 — Generation provider（教材/テスト/回答/推定）
-実装:
-- `GenerationProvider` 抽象（教材生成・ミニテスト生成・教材中Q&A・理解度推定・skill delta 抽出）
-- Gemini provider 実装（structured output）
-- prompt_version / model_name / temperature 等メタデータ保存
+### 受け入れ条件
 
-受け入れ条件:
-- 3 候補が返る
-- Document Skill と Preference Skill が prompt に反映される
-- 生成ログが保存される
-- A/B で同一入力に対して、差分が Skills の有無だけになる（B は skill_profile を入力に含めない）
-- 教材・テスト・回答・推定が JSON schema 通りに生成できる
+- 管理者が PDF を upload できる。
+- `source_documents.status=uploaded` で保存される。
 
-## 6. Phase 6 — Skills（Aのみ）/ ON-OFF 差分担保
-実装:
-- skill_profile（テキスト/JSON）の保存・履歴（skill_revisions）
-- worker job: skill update（Aのみ）
-- B/C: skill 参照・更新・反映を無効化（ログは保存）
+## Phase 4: Document Agent Skill extraction
 
-受け入れ条件:
-- A で revision が増え、次サイクルの生成に反映される
-- B で skill_revision が増えない（または更新処理が走らない）
+### 作業
 
-## 7. Phase 7 — Group C（固定教材・同一フロー）
-実装:
-- C 用の固定教材リポジトリ（テキスト）
-- Material/Assessment の API は同一だが、C は `source_type=fixed` を返す
-- チャット UI/ API を C では無効化
+- PDF parser interface
+- extraction prompt
+- Document Agent Skill JSON schema
+- schema validation
+- revision save
+- entry normalization
+- admin preview UI
 
-受け入れ条件:
-- C でも Pre → Cycle1..3 → Post を完走できる
-- ログは A/B と同一粒度で保存される（比較可能）
+### 受け入れ条件
 
-## 9. テスト方針
-### backend
-- settings test
-- run start/finish test
-- pre/mini/post start/submit test（時間ログ含む）
-- materials next/read_confirm test（時間ログ含む）
-- chat ask state guard test（教材閲覧中のみ）
-- mastery estimate persistence test
-- skill merge logic test
+- PDF から Document Agent Skill が生成される。
+- `document_skill_revisions` と `document_skill_entries` に保存される。
+- 管理者画面で skill 内容を確認できる。
 
-### frontend
-- component render test
-- API integration smoke test
+## Phase 5: Run start / participant flow
 
-### e2e
-- run start
-- pre-test submit
-- cycle1..3: material → read_confirm → mini-test submit → mastery estimate
-- post-test submit
-- export contains durations
-- (A) skill updated and reflected
+### 作業
 
-## 10. 実装優先度
+- participant login
+- run start API
+- run state machine
+- participant dashboard
+
+### 受け入れ条件
+
+- 被験者が `user_id` でログインできる。
+- ready な PDF 教材に紐づく run を開始できる。
+- `cycle_count=10` で保存される。
+
+## Phase 6: Initial test generation / submission
+
+### 作業
+
+- initial test generation API
+- initial test UI
+- answer submission
+- scoring
+- initial mastery analysis
+- Learner Agent Skill initial revision
+
+### 受け入れ条件
+
+- 「初回テストを生成」ボタンから問題が生成される。
+- 回答を送信できる。
+- スコアと分析結果が保存される。
+- Learner Agent Skill revision 1 が作成される。
+
+## Phase 7: Cycle material generation
+
+### 作業
+
+- material generation API
+- Prompt Context Builder
+- material UI
+- read-confirm API
+- read duration logging
+
+### 受け入れ条件
+
+- Learner Agent Skill の weak_topics を重点化した教材が生成される。
+- 被験者が教材を閲覧できる。
+- 読了ボタンで閲覧時間が保存される。
+
+## Phase 8: Cycle test generation / submission
+
+### 作業
+
+- cycle test generation API
+- used question fingerprint handling
+- cycle test UI
+- answer submission
+- scoring
+- Learner Agent Skill update
+
+### 受け入れ条件
+
+- Cycle 1〜10 のテストを生成できる。
+- 過去問題 fingerprint と重複しない。
+- 各テスト提出後に Learner Agent Skill revision が増える。
+
+## Phase 9: 10-cycle orchestration
+
+### 作業
+
+- state transition enforcement
+- current cycle display
+- next action UI
+- edge case handling
+
+### 受け入れ条件
+
+- 初回テスト後、Cycle 1〜10 を順番に完走できる。
+- 順序外 API は 409 を返す。
+- Cycle 10 submit 後、final test generation が可能になる。
+
+## Phase 10: Final test / result page
+
+### 作業
+
+- final test generation
+- final test UI
+- final scoring
+- result summary generation
+- improvement dashboard
+
+### 受け入れ条件
+
+- 最終テストを生成・提出できる。
+- 初回スコア、最終スコア、gain、gain rate を表示できる。
+- サイクルごとの点数推移を表示できる。
+
+## Phase 11: Admin analytics / export
+
+### 作業
+
+- run list
+- run detail
+- skill history
+- score trend
+- CSV export
+
+### 受け入れ条件
+
+- 管理者が各被験者の進捗と結果を確認できる。
+- CSV を出力できる。
+
+## Phase 12: Tests / Quality
+
+### 作業
+
+- backend unit tests
+- API tests
+- state transition tests
+- schema validation tests
+- frontend lint
+- backend lint/type check
+
+### 受け入れ条件
+
+- CI 相当のコマンドが README に記載されている。
+- 主要 API の happy path がテストされている。
+
+## 優先順位
+
 ### P0
-- Docker
-- DB
-- run/start-finish + study flow endpoints
-- time logging (material/read + assessment attempts)
-- generation provider (material/quiz/answer/estimate)
+
+- Docker 起動
+- DB schema
+- PDF upload
+- Document Agent Skill extraction
+- run start
+- initial test
+- Learner Agent Skill
+- 10 cycle loop
+- final test
+- result page
 
 ### P1
-- logs
-- export
-- admin page
+
+- admin analytics
+- CSV export
+- detailed generation logs
+- retry handling
 
 ### P2
-- UI polishing
-- richer analytics
 
-## 11. Codex への注意
-- まず P0 を終わらせる
-- 実装途中で凝った最適化を入れない
-- 動く縦スライスを優先
-- 失敗したら mock provider で先に通す
+- UI polish
+- charts
+- multiple PDF experiments
+- richer item analysis
+
+## 実装上の注意
+
+- RAG を shortcut として追加しない。
+- PDF 本文を毎回丸ごと prompt に入れない。
+- Document Agent Skill は ingestion 時に確定する。
+- Learner Agent Skill は append-only revision とする。
+- 問題重複防止のため fingerprint を必ず保存する。
