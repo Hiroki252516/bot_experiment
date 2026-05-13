@@ -1,161 +1,230 @@
-# 02 Architecture（研究用：適応型学習サイクル）
+# 02 Architecture
 
-本ドキュメントは、研究フロー（Pre → Cycle1..3 → Post）と A/B/C 条件を実装するためのシステム構成を定義する。
-研究仕様の正本は `docs/07_adaptive_learning_design.md` とし、本書は実装視点で要点をまとめる。
+## 1. 設計方針
 
-> 2026-05 update: 新規 runtime answer-generation path は embedding / vector retrieval を使わず、ingestion 時に抽出した **Document Skill entries** を参照する。pgvector と RAG テーブルは legacy として保持する。
+本システムは、PDF教材を Agent Skills 化し、被験者のテスト結果から Learner Agent Skill を更新しながら、10 回の教材生成・テスト生成・理解度推定ループを実行する研究用 Web アプリである。
 
-## 1. 採用アーキテクチャ
-### Monorepo
-- `apps/frontend`（Next.js）
-- `apps/backend`（FastAPI）
-- `apps/worker`（Python worker）
-- `packages/shared-schemas`（Pydantic/TS 共有スキーマ想定）
+runtime で RAG、embedding search、vector DB retrieval は行わない。PDF 教材は ingestion 時に構造化し、Document Agent Skill として保存する。学習者の理解状態はテスト結果から Learner Agent Skill として保存する。生成時には、これらの Agent Skill JSON を deterministic に prompt context へ変換して LLM に渡す。
 
-理由:
-- Docker Compose で一括起動しやすい
-- frontend/backend/worker の境界が明確
-- スキーマを共有しやすく、研究ログの一貫性を保ちやすい
+## 2. Monorepo 構成
 
-## 2. 技術選定（研究要件との整合）
-### Backend: FastAPI
-- OpenAPI により研究用 UI/API の仕様が明確
-- Pydantic により JSON スキーマを固定しやすい
+```text
+.
+├── apps/
+│   ├── backend/
+│   │   ├── app/
+│   │   │   ├── api/
+│   │   │   ├── core/
+│   │   │   ├── db/
+│   │   │   ├── models/
+│   │   │   ├── schemas/
+│   │   │   ├── services/
+│   │   │   └── generation/
+│   │   └── tests/
+│   ├── frontend/
+│   │   ├── app/
+│   │   ├── components/
+│   │   ├── lib/
+│   │   └── types/
+│   └── worker/
+│       ├── app/
+│       │   ├── ingestion/
+│       │   ├── skills/
+│       │   └── jobs/
+│       └── tests/
+├── packages/
+│   └── shared-schemas/
+├── docs/
+├── docker-compose.yml
+└── README.md
+```
 
-### DB: PostgreSQL + pgvector
-理由:
-- 通常のリレーショナルデータとベクトル検索を同居できる
-- ログ、実験データ、candidate、skill revision を一元管理できる
-- 新規 Document Skill tables と legacy vector tables を同一 DB で管理できる
-### DB: PostgreSQL（+ pgvector は維持）
-- 実験 run、教材、テスト、所要時間、推定値、Skills 履歴を一元管理する
-- 本研究では RAG を主題にしないが、インフラ制約として pgvector を残しても運用可能にする（RAG 未使用でも起動可能）
+## 3. コンポーネント責務
 
-### Frontend: Next.js
-- 研究フローを「状態遷移」として UI に落とし込みやすい
-- ログ/実験 run の確認 UI を作りやすい
-
-### Worker
-理由:
-- Preference Skill 更新、Document Skill extraction などを API リクエストから分離できる
-- Skills 更新や理解度推定を API リクエストから切り離す（将来の再実行・再計算が容易）
-- 研究段階では同期実行でもよいが、非同期ジョブに分離できる構成を維持する
-
-## 3. Docker Compose 構成
-必須サービス:
-1. `frontend`
-2. `backend`
-3. `worker`
-4. `db`
-
-要件:
-- named volume で DB 永続化
-- backend/worker は db healthcheck 成功後に起動
-- `.env` を読み込む
-
-## 4. コンポーネント責務（研究フロー中心）
 ### frontend
-- 実験 run 開始（A/B/C の選択または割当表示）
-- Pre-test（MCQ）画面
-- 教材閲覧画面（読了ボタン、チャット入力は教材閲覧中のみ）
-- Mini-test（MCQ）画面（Cycle 1..3）
-- Post-test（MCQ）画面
-- 進捗表示（Cycle の現在地）
-- 研究ログ確認（最低限：run 一覧と詳細）
+
+- 管理者画面
+- PDF upload UI
+- 被験者ログイン
+- 初回テスト生成・受験 UI
+- 教材閲覧 UI
+- サイクルテスト UI
+- 最終テスト UI
+- 成績向上 dashboard
+- 実験進捗表示
 
 ### backend
+
 - REST API
-- session / conversation 管理
-- Document Skill context 構築
-- skill 読み出し
-- LLM candidate generation
-- 選択結果保存
+- run 状態管理
+- PDF upload 受付
+- worker job 起動
+- Document Agent Skill 読み出し
+- Learner Agent Skill 読み出し・更新
+- LLM provider 呼び出し
+- テスト生成
+- 教材生成
+- 採点
+- 理解度推定
 - CSV export
 
 ### worker
-- document ingestion
-- Document Skill extraction
-- Document Skill revision / entries 保存
-- skill updater
-- 非同期ジョブ管理
 
-### db
-- 学習資料
-- Document Skill revision / entries
-- embeddings
+> **現状実装について**: PDF parsing および Document Agent Skill extraction は、現在 backend の `/api/admin/documents/{document_id}/extract-skill` エンドポイントが同期的に実行している（`pypdf` + LLM provider 直接呼び出し）。将来的に worker への非同期移行を予定しているが、MVP フェーズでは backend 同期実行のままとする。
+
+- 将来の非同期 PDF parsing（worker 移行予定）
+- 将来の非同期 Document Agent Skill extraction（worker 移行予定）
+- Document Agent Skill validation
+- 長時間 LLM job の実行
+- optional async material/test generation
+
+### database
+
 - users
-- conversations
-- turns
-- candidates
-- feedback
-- skills
-- skill revisions
-- experiment runs
-- 研究フロー API（run 開始/終了、教材提示、テスト開始/提出、採点、推定）
-- チャット API（教材閲覧中のみ許可）
-- Skills ON/OFF の厳密な差分を担保（A は参照/更新/反映、B はしない）
-- エクスポート（CSV/JSONL）
+- source_documents
+- document_skill_revisions
+- document_skill_entries
+- experiment_runs
+- generated_assessments
+- assessment_attempts
+- generated_materials
+- material_reads
+- learner_skill_revisions
+- generation_logs
+- export_jobs
 
-### worker
-- skill updater（A のみ）
-- mastery estimator（必要なら job として分離）
-- 再計算系（管理 API から再実行できる余地を残す）
+## 4. Agent Skills Architecture
 
-### db
-研究に必要な正本データ:
-- users / runs（A/B/C 条件、skills_enabled）
-- materials（教材本文）
-- material_reads（教材閲覧の開始/読了/所要時間）
-- assessments（テスト定義：pre/mini/post）
-- assessment_attempts（回答、採点、開始/提出/所要時間）
-- mastery_estimates（理解度推定履歴）
-- chat_turns（教材紐付け、A/Bのみ）
-- skills / skill_revisions（Aのみ更新）
+### 4.1 Document Agent Skill
 
-## 5. Provider abstraction（RAG 依存を分離）
-本研究で必須なのは「教材生成・ミニテスト生成・読解支援回答・理解度推定・Skills 更新」であり、いずれも LLM による structured output（JSON）を前提とする。
+PDF 教材から抽出した学習対象の構造化表現である。教材本文を毎回検索するのではなく、ingestion 時点で以下を確定する。
 
-### GenerationProvider（必須）
-例:
-- `generate_material(input) -> MaterialJson`
-- `generate_quiz(input) -> AssessmentJson`
-- `answer_question(input) -> ChatAnswerJson`
-- `estimate_mastery(input) -> MasteryEstimateJson`
-- `extract_skill_delta(input) -> SkillDeltaJson`（Aのみ）
+- 学習目標
+- トピック階層
+- 重要概念
+- 前提知識
+- 例文・例題
+- よくある誤解
+- 難易度マップ
+- テスト設計 blueprint
+- 正答根拠
+- 教材範囲外として扱う内容
 
-### EmbeddingProvider（任意 / 将来）
-RAG を使う実験に拡張する場合に備えて保持するが、本研究の主要フローでは必須としない。
+### 4.2 Learner Agent Skill
 
-## 6. 主要フロー（Pre → Cycle1..3 → Post）
-### A. Run 開始から Pre-test
-1. frontend が run を開始（group=A/B/C, skills_enabled を確定）
-2. Pre-test を開始し回答を提出
-3. backend が採点し、結果を保存
+被験者の現在の理解状態を表す構造化プロファイルである。初回テスト後に作成し、各サイクルテスト後に更新する。
 
-### B. サイクル（Cycle 1..3）
-1. backend が教材を提示（A/B: 生成、C: 固定）
-2. ユーザーが教材を閲覧し、読了ボタンで確定（所要時間保存）
-3. ミニテスト開始 → 回答提出 → 採点（所要時間保存）
-4. backend/worker が理解度推定を保存
-5. A の場合のみ、worker が skill 更新を実行し次回に反映
+- 総合理解度
+- トピック別理解度
+- 理解済み項目
+- 弱点項目
+- 誤概念
+- 次に重点化すべき項目
+- 推奨難易度
+- 過去生成問題 fingerprint
+- evidence
 
-### C. Post-test と終了
-1. Post-test 開始 → 回答提出 → 採点
-2. run を終了し、エクスポート可能な状態にする
+### 4.3 Prompt Context Builder
 
-## 7. Prompt 設計方針（A/B差分の担保）
-- すべての LLM 生成は strict JSON schema を前提とする
-- A（Skillsあり）:
-  - `skill_profile` を生成入力に含める
-  - 学習ログ（直近の誤答、所要時間、質問履歴）を要約して入力に含める
-- B（Skillsなし）:
-  - `skill_profile` を入力に含めない
-  - 学習ログは保存のみ（生成入力の「学習者特性」として使わない）
-- チャットは教材閲覧中のみ許可し、教材本文を入力に含める（逸脱防止）
+generation 時に Document Agent Skill と Learner Agent Skill を deterministic に整形する。
 
-## 8. 障害時方針
-- LLM 呼び出し失敗時は 5xx と相関 ID を返す
-- skill 更新失敗時:
-  - A の run 自体は継続可能（推定や次教材生成は継続）
-  - skill update job は再試行可能な形でログを残す
-- 時間制限は設けないが、開始/提出/読了イベントが欠けた場合は run を完走できないため、UI と API で必須入力を強制する
+- 初回テスト生成: Document Agent Skill のみ使用
+- 初回テスト分析: Document Agent Skill + attempt result
+- 教材生成: Document Agent Skill + Learner Agent Skill
+- サイクルテスト生成: Document Agent Skill + Learner Agent Skill + used question fingerprints
+- 最終テスト生成: Document Agent Skill + used question fingerprints
+- 結果表示: attempts + Learner Agent Skill history
+
+## 5. 状態遷移
+
+```text
+CREATED
+  -> PDF_SKILL_READY
+  -> RUN_STARTED
+  -> INITIAL_TEST_GENERATED
+  -> INITIAL_TEST_SUBMITTED
+  -> CYCLE_MATERIAL_GENERATED(cycle=1)
+  -> CYCLE_MATERIAL_READ(cycle=1)
+  -> CYCLE_TEST_GENERATED(cycle=1)
+  -> CYCLE_TEST_SUBMITTED(cycle=1)
+  -> ... repeat until cycle=10
+  -> FINAL_TEST_GENERATED
+  -> FINAL_TEST_SUBMITTED
+  -> RESULT_READY
+  -> FINISHED
+```
+
+不正な状態遷移は backend で拒否し、409 Conflict を返す。
+
+## 6. LLM Provider Layer
+
+`GenerationProvider` 抽象を用意する。
+
+```text
+GenerationProvider
+├── generate_initial_test
+├── analyze_attempt
+├── generate_learning_material
+├── generate_cycle_test
+├── update_learner_skill
+├── generate_final_test
+└── generate_result_summary
+```
+
+すべてのメソッドは JSON schema で出力を検証する。失敗時は retry し、最終的に validation error を generation_logs に残す。
+
+## 7. PDF Ingestion Flow
+
+1. 管理者が PDF を upload する。
+2. backend が `source_documents` を作成する。
+3. worker が PDF を parse する。
+4. LLM が Document Agent Skill JSON を生成する。
+5. schema validation を行う。
+6. `document_skill_revisions` と `document_skill_entries` に保存する。
+7. 管理者画面で ready 状態にする。
+
+## 8. Runtime Generation Flow
+
+### 初回テスト
+
+- 入力: Document Agent Skill
+- 出力: 学習範囲全体を覆う initial assessment
+- 保存: generated_assessments
+
+### 教材生成
+
+- 入力: Document Agent Skill + Learner Agent Skill
+- 出力: 弱点補強用教材
+- 保存: generated_materials
+
+### サイクルテスト
+
+- 入力: Document Agent Skill + Learner Agent Skill + 過去問題 fingerprint
+- 出力: 新規問題
+- 保存: generated_assessments
+
+### 最終テスト
+
+- 入力: Document Agent Skill + 過去問題 fingerprint
+- 出力: 範囲全体を測る final assessment
+- 保存: generated_assessments
+
+## 9. 非採用: Runtime RAG
+
+以下の処理は行わない。
+
+- PDF chunk embedding
+- query embedding
+- vector similarity search
+- top-k chunk retrieval
+- retrieval result を prompt に差し込む処理
+
+必要な文脈は ingestion 時に構造化された Agent Skill から得る。
+
+## 10. セキュリティ・再現性
+
+- PDF upload は管理者のみ。
+- provider/model/prompt_version/temperature/schema_version を全 generation に保存。
+- PDF 原本と Document Agent Skill revision を immutable に扱う。
+- Learner Agent Skill は revision append-only とする。
+- テスト問題は fingerprint を保存し、重複抑制に使う。

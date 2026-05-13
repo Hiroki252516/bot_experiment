@@ -1,143 +1,272 @@
-# 05 Evaluation Protocol（A/B/C：学習効果の群比較）
+# 05 Evaluation Protocol
 
-本書は `docs/07_adaptive_learning_design.md` の研究フロー（Pre → Cycle1..3 → Post）を前提に、保存ログと評価指標を定義する。
+## 1. 評価目的
 
-> 2026-05 update: runtime retrieval logs は legacy。教材参照の評価単位は **document_skill_usage_logs** と **document_skill_entries**。
+本実験は、PDF教材に基づく学習対象について、AI が被験者の理解状態を推定し、弱点補強教材とテストを 10 サイクル生成することで、初回テストから最終テストまでの成績がどの程度向上するかを測定する。
 
-## 1. 目的
-研究仮説を検証する。
-- 仮説: **学習ログに基づく適応型（Group A: Skillsあり）は、非適応型（Group B: Skillsなし）より学習効果を向上させる。**
-- 追加比較: Group C（書籍学習: 固定テキスト教材、同一フローでテスト実施）との群比較を行う。
+## 2. 主指標
 
-## 2. 実験条件（群定義）
-- Group A: `skills_enabled=true`（skill 更新・参照・反映あり）
-- Group B: `skills_enabled=false`（skill 更新・参照・反映なし。ログは保存）
-- Group C: `skills_enabled=false` + `material_source=fixed`（固定教材。フローは同一。チャット介入なし）
+### Gain Score
 
-## 3. 保存すべきログ（必須）
-本研究の最重要ログは「Pre/Post」「Cycle1..3」「教材/テスト所要時間」である。時間制限は設けないが、所要時間は必ず保存する。
+```text
+gain_score = final_score - initial_score
+```
 
-### 3.1 run 単位
+### Gain Rate
+
+```text
+gain_rate = (final_score - initial_score) / initial_max_score
+```
+
+初回テストと最終テストは同じ学習範囲を測る。ただし、同一問題の丸写しは避ける。
+
+## 3. 補助指標
+
+- cycle_score_trend
+- mastery_by_topic_trend
+- weak_topic_reduction
+- misconception_reduction
+- material_read_duration_seconds
+- test_duration_seconds
+- question_overlap_rate
+- learner_skill_revision_count
+- generation_validation_error_count
+
+## 4. 実験単位
+
+1 run は、1 被験者が 1 PDF 教材に対して行う一連の実験を表す。
+
+1 run は以下を含む。
+
+- initial test
+- initial analysis
+- Cycle 1〜10
+  - generated material
+  - material read
+  - cycle test
+  - test analysis
+  - Learner Agent Skill update
+- final test
+- result summary
+
+## 5. 保存ログ
+
+### run log
+
 - run_id
 - user_id
-- group (A|B|C)
-- skills_enabled
-- cycle_count（MVP=3）
-- started_at / finished_at
-- provider name / model name / temperature / top_p / prompt_version
-
-### Document Skill usage 単位
 - document_id
 - document_skill_revision_id
-- document_skill_entry_id
-- entry_type
-- included_order
-- context_hash
-### 3.2 教材単位（Cycle 1..3）
-- material_id
-- run_id
+- started_at
+- finished_at
+- cycle_count
+- state
+
+### assessment log
+
+- assessment_id
+- assessment_type
 - cycle_index
-- source_type (generated|fixed)
-- difficulty（A/B の生成物。C は固定でも付与可能）
+- questions_json
+- question_fingerprints_json
+- provider
+- model
+- prompt_version
+- temperature
+- created_at
+
+### attempt log
+
+- attempt_id
+- assessment_id
+- started_at
+- submitted_at
+- duration_seconds
+- answers_json
+- score
+- max_score
+- per_question_correct_json
+- analysis_json
+
+### material log
+
+- material_id
+- cycle_index
+- title
+- content_markdown
+- focus_topics_json
+- learner_skill_revision_id
+- created_at
+
+### material read log
+
+- material_id
 - presented_at
 - read_confirmed_at
 - read_duration_seconds
 
-### 3.3 テスト定義（Pre/Mini/Post）
-- assessment_id
-- run_id
-- assessment_type (pre_test|mini_test|post_test)
-- cycle_index（miniのみ）
-- questions（stem/choices/correct など、正本は JSON）
+### Learner Agent Skill log
 
-### 3.4 テスト試行（attempt）
-- assessment_attempt_id
+- learner_skill_revision_id
+- run_id
+- revision
+- source_attempt_id
+- skill_json
+- update_reason
+- created_at
+
+### Document Agent Skill log
+
+- document_skill_revision_id
+- document_id
+- revision
+- skill_json
+- schema_version
+- extraction_prompt_version
+- created_at
+
+## 6. 問題重複の評価
+
+各問題に fingerprint を付与する。
+
+fingerprint は以下をもとに生成する。
+
+- topic_key
+- tested_concept
+- required_reasoning_pattern
+- normalized_stem
+- normalized_correct_answer
+
+サイクルテストと最終テストでは、過去 fingerprint と一致または高類似になる問題を避ける。MVP では完全一致禁止を必須とし、近似重複検出は P1 とする。
+
+## 7. 分析観点
+
+### 全体成績
+
+- initial_score と final_score の差
+- 正答率の差
+- 10 サイクル中の伸び方
+
+### トピック別理解度
+
+- 初回時点の weak_topics
+- 各サイクル後の mastery_by_topic
+- 最終時点で改善した topic
+- 最終時点でも残った weak topic
+
+### 学習効率
+
+- 教材閲覧時間と score gain の関係
+- テスト所要時間と正答率の関係
+- サイクルを重ねるごとの所要時間変化
+
+### 生成品質
+
+- JSON schema validation 成功率
+- 問題重複率
+- 教材が weak_topics を扱っている割合
+- 範囲外出題率
+
+## 8. CSV Export
+
+### runs.csv
+
+- run_id
+- user_id
+- document_id
+- started_at
+- finished_at
+- initial_score
+- final_score
+- gain_score
+- gain_rate
+
+### assessments.csv
+
 - assessment_id
 - run_id
 - assessment_type
-- cycle_index（miniのみ）
-- started_at
-- submitted_at
+- cycle_index
+- question_count
+- created_at
+
+### attempts.csv
+
+- attempt_id
+- assessment_id
+- run_id
+- assessment_type
+- cycle_index
+- score
+- max_score
 - duration_seconds
-- answers（正本は JSON）
-- score / max_score
-- per_question_correct（正本は JSON）
+- submitted_at
 
-### 3.5 理解度推定（推奨）
-- mastery_estimate_id
-- run_id
-- cycle_index
-- mastery_estimate（数値）
-- confidence
-- evidence_summary
-- created_at
+### materials.csv
 
-### 3.6 チャット（A/Bのみ、教材閲覧中のみ）
-- chat_turn_id
-- run_id
 - material_id
+- run_id
 - cycle_index
-- question_text
-- answer_text
+- focus_topics
+- content_length
 - created_at
 
-### 3.7 skills（Aのみ）
-- skill_id / active_revision
-- skill_revisions（old/new、update_reason、profile_json）
+### material_reads.csv
 
-## 4. 分析指標（最小）
-### 4.1 主指標（学習効果）
-- **gain = Post-test score - Pre-test score**
-  - 群比較: A vs B vs C
+- material_id
+- run_id
+- cycle_index
+- read_duration_seconds
 
-### 4.2 補助指標（過程）
-- Cycle 1..3 のミニテスト得点推移（学習曲線）
-- 教材閲覧時間（read_duration_seconds）の分布と群差
-- テスト所要時間（duration_seconds）の分布と群差
-- チャット介入量（質問回数、文字数など）と成績との関係（A/B）
+### learner_skill_revisions.csv
 
-## 5. 最低限必要なエクスポート（CSV/JSONL）
-MVP では CSV を必須とし、JSONL は任意だが推奨。
+- learner_skill_revision_id
+- run_id
+- revision
+- overall_mastery
+- weak_topics
+- known_topics
+- recommended_next_focus
+- created_at
 
-## 4. 実験条件
-最低限:
-- Condition A: skills_enabled=false
-- Condition B: skills_enabled=true
+### question_items.csv
 
-## 5. 最低限必要な CSV
-- turns.csv
-- candidates.csv
-- feedback.csv
-- skill_revisions.csv
-- document_skill_revisions.csv
-- document_skill_entries.csv
-- document_skill_usage_logs.csv
-- retrievals.csv は deprecated header のみ互換維持
-必須 CSV:
-- runs.csv
-- materials.csv
-- material_reads.csv
-- assessments.csv
-- assessment_attempts.csv
-- mastery_estimates.csv（推奨だが欠損許容はしない方がよい）
-- chat_turns.csv（A/Bのみ。C は空でよい）
-- skill_revisions.csv（Aのみ）
+- assessment_id
+- question_id
+- topic_key
+- difficulty
+- fingerprint
+- correct_rate
 
-## 6. 再現性のための保存項目
-- provider name
-- model name
-- temperature
-- top_p
-- candidate_count
-- Document Skill extraction model
-- Document Skill prompt_version
-- Document Skill context budget
-- temperature / top_p
+### generation_logs.csv
+
+- generation_log_id
+- run_id
+- generation_type
+- provider
+- model
 - prompt_version
-- cycle_count（=3）
-- group / skills_enabled
-- material source_type（generated|fixed）
+- validation_status
+- created_at
 
-## 7. 研究上の注意
-- 時間制限は設けない（強制終了しない）。ただし所要時間は必須ログとする。
-- Group B は「同一UI/同一LLMで Skills を使わない」に固定し、LLM 変更（例: Ollama 固定）を入れる場合は別条件として扱う（交絡を増やすため）。
+## 9. 可視化要件
+
+Result page では最低限以下を表示する。
+
+- 初回テスト点数
+- 最終テスト点数
+- 点数差
+- 正答率差
+- Cycle 1〜10 の点数推移
+- トピック別理解度の変化
+- 改善した項目
+- 残った課題
+
+## 10. 再現性要件
+
+- すべての LLM 呼び出しに provider/model/prompt_version/temperature を保存する。
+- Document Agent Skill revision を保存する。
+- Learner Agent Skill revision を保存する。
+- 生成されたテスト問題と教材本文を保存する。
+- 採点結果と分析結果を保存する。
+- 実験後に CSV だけで主要分析を再現できるようにする。
