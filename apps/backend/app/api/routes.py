@@ -426,19 +426,6 @@ def adaptive_get_export_route(export_job_id: str, session: Session = Depends(get
 # --- Study flow APIs (Pre → Cycle1..3 → Post) ---
 
 
-@router.post("/api/runs/start", response_model=RunStartResponse)
-def start_run_route(payload: RunStartRequest, session: Session = Depends(get_session)) -> RunStartResponse:
-    run = start_run(session, user_id=payload.user_id, group=payload.group, cycle_count=payload.cycle_count)
-    return RunStartResponse(
-        run_id=run.id,
-        user_id=run.user_id,
-        group=run.group,
-        skills_enabled=run.skills_enabled,
-        cycle_count=run.cycle_count,
-        created_at=run.created_at,
-    )
-
-
 @router.post("/api/runs/finish", response_model=RunFinishResponse)
 def finish_run_route(payload: RunFinishRequest, session: Session = Depends(get_session)) -> RunFinishResponse:
     run = finish_run(session, payload.run_id)
