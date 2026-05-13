@@ -107,6 +107,7 @@ def get_document_skill_revision_by_id(session: Session, revision_id: str) -> Ada
 def finish_run_adaptive(session: Session, run_id: str) -> ExperimentRun:
     run = _require_run(session, run_id)
     if run.finished_at:
+        session.refresh(run)
         return run
     run.finished_at = utcnow()
     session.commit()
